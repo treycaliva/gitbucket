@@ -1,0 +1,49 @@
+# Files excluded from `gcloud run deploy --source=.` uploads.
+# The Dockerfile only needs: go.mod, go.sum, main.go, internal/, frontend/.
+# Everything else is dev-only or legacy.
+
+.git/
+.gitignore
+.gcloudignore
+
+# Local secrets / dev config
+.env
+.env.*
+.claude/
+.firebaserc
+firebase.json
+
+# Local Go binary (built fresh in Docker, ~40 MB)
+/gitbucket
+
+# Node dev artifacts (Dockerfile reinstalls)
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/lint_output.txt
+
+# Legacy Node/Express implementation (not built or deployed — see CLAUDE.md).
+# Leading `/` anchors to repo root so we don't also exclude frontend/package.json.
+/server/
+/package.json
+/package-lock.json
+
+# Agent / planning artifacts
+.agents/
+docs/
+ORIGINAL_REQUEST.md
+PROJECT.md
+TEST_READY.md
+TEST_INFRA.md
+CLAUDE.md
+*.md
+
+# E2E tests and one-off scripts (not used by container build)
+tests/
+scratch/
+scripts/
+
+# OS / editor noise
+.DS_Store
+*.log
+tmp/

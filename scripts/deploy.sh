@@ -22,6 +22,11 @@ fi
 
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
+# Pre-flight: compile the Go binary the same way the Dockerfile does, so we
+# don't ship syntactically broken code and wait ~5 min for Cloud Build to tell us.
+echo "==> pre-flight: go build"
+CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /dev/null main.go
+
 echo "==> deploying $SERVICE to $REGION (project=$PROJECT_ID, sha=$GIT_SHA)"
 
 gcloud run deploy "$SERVICE" \
