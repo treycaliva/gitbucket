@@ -79,11 +79,17 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/tree/{branch}", h.GetTree)
 			r.Get("/repos/{owner}/{repo}/tree/{branch}/*", h.GetTree)
 			r.Get("/repos/{owner}/{repo}/blob/{branch}/*", h.GetBlob)
+			r.Get("/repos/{owner}/{repo}/codeowners", h.CodeOwnersHandler)
 
 			r.Get("/repos/{owner}/{repo}/pulls", h.ListPullRequests)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPullRequest)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}/commits", h.GetPullRequestCommits)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}/diff", h.GetPullRequestDiff)
+			r.Get("/repos/{owner}/{repo}/pulls/{number}/reviews", h.ListReviewsHandler)
+
+			r.Get("/repos/{owner}/{repo}/collaborators", h.ListCollaboratorsHandler)
+
+			r.Get("/repos/{owner}/{repo}/branch-protection", h.ListBranchProtectionHandler)
 		})
 
 		// Authenticated group
@@ -105,6 +111,14 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Post("/repos/{owner}/{repo}/pulls", h.CreatePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/merge", h.MergePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/close", h.ClosePullRequest)
+			r.Post("/repos/{owner}/{repo}/pulls/{number}/reviews", h.SubmitReviewHandler)
+
+			r.Post("/repos/{owner}/{repo}/collaborators", h.AddCollaboratorHandler)
+			r.Delete("/repos/{owner}/{repo}/collaborators/{username}", h.RemoveCollaboratorHandler)
+
+			r.Post("/repos/{owner}/{repo}/branch-protection", h.CreateBranchProtectionHandler)
+			r.Put("/repos/{owner}/{repo}/branch-protection/{ruleId}", h.UpdateBranchProtectionHandler)
+			r.Delete("/repos/{owner}/{repo}/branch-protection/{ruleId}", h.DeleteBranchProtectionHandler)
 		})
 	})
 }

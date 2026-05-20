@@ -190,6 +190,29 @@ func main() {
 	err = testBlobAPI(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, cfg.RepoName)
 	record(tier4, "Browse Blob Content API", err == nil, "%v", err)
 
+	// ----------------------------------------------------
+	// TIER 5: Branch Protection + Codeowner Merge Gating
+	// ----------------------------------------------------
+	tier5 := "Tier 5: Branch Protection / Codeowners"
+
+	err = testForcePushBlocked(cfg, patToken)
+	record(tier5, "Force-Push To Protected Branch Rejected", err == nil, "%v", err)
+
+	err = testDirectPushNonAllowlistedBlocked(cfg, patToken)
+	record(tier5, "Direct Push By Non-Allowlisted User Rejected", err == nil, "%v", err)
+
+	err = testDirectPushAllowlistedSucceeds(cfg, patToken)
+	record(tier5, "Direct Push By Allowlisted Collaborator Succeeds", err == nil, "%v", err)
+
+	err = testMergeBlockedByMissingApproval(cfg, patToken)
+	record(tier5, "PR Merge Blocked By Missing Approval", err == nil, "%v", err)
+
+	err = testMergeBlockedByMissingCodeownerApproval(cfg, patToken)
+	record(tier5, "PR Merge Blocked By Missing Codeowner Approval", err == nil, "%v", err)
+
+	err = testMergeSucceedsAfterCodeownerApproval(cfg, patToken)
+	record(tier5, "PR Merge Succeeds After Codeowner Approval", err == nil, "%v", err)
+
 	// Print Test Matrix Summary
 	printSummary()
 
@@ -828,6 +851,641 @@ func testBlobAPI(baseURL, uid, username, repoName string) error {
 	}
 
 	return nil
+}
+
+// ----------------------------------------------------
+// TIER 5 IMPLEMENTATIONS (Branch Protection / Codeowners)
+// ----------------------------------------------------
+//
+// These scenarios each provision a fresh repository so they are isolated and
+// can run in any order without cross-contamination. Helpers below the
+// scenarios encapsulate the REST API calls (create BP rule, add collaborator,
+// open PR, submit review, merge) that the Tier 1-4 suites don't already
+// expose.
+//
+// NOTE on push-rejection semantics: GitBucket runs branch-protection
+// enforcement *after* `git-http-backend` has streamed its HTTP response, so
+// the git client sees the push as successful. The actual rejection is the
+// server-side decision to skip the GCS/Firestore sync, leaving the canonical
+// ref unchanged. The scenarios below therefore verify rejection by checking
+// that the protected ref on the server is still at the pre-push SHA (via a
+// fresh clone), rather than by asserting `git push` exits non-zero.
+
+// testForcePushBlocked: scenario 1.
+// Push an initial commit, configure a rule with BlockForcePush, then attempt
+// a force-push that rewrites history. The server must keep the original SHA.
+func testForcePushBlocked(cfg Config, token string) error {
+	repoName := "e2e-bp-force-" + randomHex(3)
+	if err := testRepoCreation(cfg.BaseURL, cfg.FirebaseUID, repoName, "public"); err != nil {
+		return fmt.Errorf("create repo: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "bp-force-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	localPath := filepath.Join(tmpDir, "local")
+	if err := initLocalRepo(localPath); err != nil {
+		return err
+	}
+	if err := writeAndCommit(localPath, "README.md", "# original\n", "initial"); err != nil {
+		return err
+	}
+	originalSHA, err := headSHA(localPath)
+	if err != nil {
+		return err
+	}
+
+	remoteURL := buildRemoteURL(cfg, token, repoName)
+	if _, err := runCmd(localPath, "git", "remote", "add", "origin", remoteURL); err != nil {
+		return err
+	}
+	if _, err := runCmd(localPath, "git", "push", "origin", "main"); err != nil {
+		return fmt.Errorf("initial push: %v", err)
+	}
+
+	// Configure the protection rule AFTER the initial push so the seed commit
+	// landed cleanly.
+	if _, err := createBranchProtectionRule(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, map[string]interface{}{
+		"pattern":        "main",
+		"blockForcePush": true,
+	}); err != nil {
+		return fmt.Errorf("create BP rule: %v", err)
+	}
+
+	// Rewrite history with --amend then force-push.
+	if err := writeAndCommit(localPath, "README.md", "# rewritten\n", "rewrite"); err != nil {
+		return err
+	}
+	// Amend to produce a divergent history (force scenario).
+	if _, err := runCmd(localPath, "git", "commit", "--amend", "--no-edit"); err != nil {
+		return err
+	}
+	forcedSHA, err := headSHA(localPath)
+	if err != nil {
+		return err
+	}
+	// The push may succeed on the wire, but server must NOT sync the new ref.
+	_, _ = runCmd(localPath, "git", "push", "--force", "origin", "main")
+
+	// Verify the server still serves the original SHA.
+	serverSHA, err := remoteHeadSHA(cfg, token, repoName, "main")
+	if err != nil {
+		return fmt.Errorf("ls-remote: %v", err)
+	}
+	if serverSHA != originalSHA {
+		return fmt.Errorf("force push was not rejected: server SHA %s, expected %s (forced %s)", serverSHA, originalSHA, forcedSHA)
+	}
+	return nil
+}
+
+// testDirectPushNonAllowlistedBlocked: scenario 2.
+// Configure a push allowlist containing only the owner's UID, then push as a
+// different authenticated user (a registered collaborator) and verify the
+// ref did not change.
+func testDirectPushNonAllowlistedBlocked(cfg Config, ownerToken string) error {
+	repoName := "e2e-bp-deny-" + randomHex(3)
+	if err := testRepoCreation(cfg.BaseURL, cfg.FirebaseUID, repoName, "public"); err != nil {
+		return fmt.Errorf("create repo: %v", err)
+	}
+
+	// Provision a second user (collaborator) so authenticated pushes by a
+	// non-allowlisted user can happen.
+	collabUID := "e2e_collab_" + randomHex(3)
+	collabUsername := "e2e-collab-" + randomHex(3)
+	if err := testUserRegistration(cfg.BaseURL, collabUID, collabUsername); err != nil {
+		return fmt.Errorf("register collaborator: %v", err)
+	}
+	collabToken, err := createPATForUser(cfg.BaseURL, collabUID, "collab-pat")
+	if err != nil {
+		return fmt.Errorf("create collaborator PAT: %v", err)
+	}
+	if err := addCollaborator(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, collabUsername); err != nil {
+		return fmt.Errorf("add collaborator: %v", err)
+	}
+
+	// Seed an initial commit as the owner.
+	tmpDir, err := os.MkdirTemp("", "bp-deny-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ownerPath := filepath.Join(tmpDir, "owner")
+	if err := initLocalRepo(ownerPath); err != nil {
+		return err
+	}
+	if err := writeAndCommit(ownerPath, "README.md", "# seed\n", "seed"); err != nil {
+		return err
+	}
+	originalSHA, err := headSHA(ownerPath)
+	if err != nil {
+		return err
+	}
+	ownerRemote := buildRemoteURL(cfg, ownerToken, repoName)
+	if _, err := runCmd(ownerPath, "git", "remote", "add", "origin", ownerRemote); err != nil {
+		return err
+	}
+	if _, err := runCmd(ownerPath, "git", "push", "origin", "main"); err != nil {
+		return fmt.Errorf("seed push: %v", err)
+	}
+
+	// Allowlist only the owner UID.
+	if _, err := createBranchProtectionRule(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, map[string]interface{}{
+		"pattern":       "main",
+		"pushAllowlist": []string{cfg.FirebaseUID},
+	}); err != nil {
+		return fmt.Errorf("create BP rule: %v", err)
+	}
+
+	// Collaborator clones and pushes a normal (non-force) commit. Server must
+	// reject the sync.
+	collabPath := filepath.Join(tmpDir, "collab")
+	collabRemote := fmt.Sprintf("http://%s:%s@%s/r/%s/%s.git",
+		collabUsername, collabToken,
+		strings.Replace(cfg.BaseURL, "http://", "", 1),
+		cfg.Username, repoName)
+	if _, err := runCmd(tmpDir, "git", "clone", collabRemote, "collab"); err != nil {
+		return fmt.Errorf("collab clone: %v", err)
+	}
+	runCmd(collabPath, "git", "config", "user.name", "Collab")
+	runCmd(collabPath, "git", "config", "user.email", "collab@example.com")
+	if err := writeAndCommit(collabPath, "evil.txt", "should be rejected\n", "unauth"); err != nil {
+		return err
+	}
+	_, _ = runCmd(collabPath, "git", "push", "origin", "main")
+
+	serverSHA, err := remoteHeadSHA(cfg, ownerToken, repoName, "main")
+	if err != nil {
+		return fmt.Errorf("ls-remote: %v", err)
+	}
+	if serverSHA != originalSHA {
+		return fmt.Errorf("non-allowlisted push was not rejected: server SHA %s, expected %s", serverSHA, originalSHA)
+	}
+	return nil
+}
+
+// testDirectPushAllowlistedSucceeds: scenario 3.
+// Allowlist contains both the owner and a collaborator UID. Pushing as the
+// collaborator must succeed (server-side ref advances).
+func testDirectPushAllowlistedSucceeds(cfg Config, ownerToken string) error {
+	repoName := "e2e-bp-allow-" + randomHex(3)
+	if err := testRepoCreation(cfg.BaseURL, cfg.FirebaseUID, repoName, "public"); err != nil {
+		return fmt.Errorf("create repo: %v", err)
+	}
+
+	collabUID := "e2e_collab_ok_" + randomHex(3)
+	collabUsername := "e2e-collab-ok-" + randomHex(3)
+	if err := testUserRegistration(cfg.BaseURL, collabUID, collabUsername); err != nil {
+		return fmt.Errorf("register collaborator: %v", err)
+	}
+	collabToken, err := createPATForUser(cfg.BaseURL, collabUID, "collab-pat")
+	if err != nil {
+		return err
+	}
+	if err := addCollaborator(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, collabUsername); err != nil {
+		return fmt.Errorf("add collaborator: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "bp-allow-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ownerPath := filepath.Join(tmpDir, "owner")
+	if err := initLocalRepo(ownerPath); err != nil {
+		return err
+	}
+	if err := writeAndCommit(ownerPath, "README.md", "# seed\n", "seed"); err != nil {
+		return err
+	}
+	ownerRemote := buildRemoteURL(cfg, ownerToken, repoName)
+	if _, err := runCmd(ownerPath, "git", "remote", "add", "origin", ownerRemote); err != nil {
+		return err
+	}
+	if _, err := runCmd(ownerPath, "git", "push", "origin", "main"); err != nil {
+		return fmt.Errorf("seed push: %v", err)
+	}
+
+	if _, err := createBranchProtectionRule(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, map[string]interface{}{
+		"pattern":       "main",
+		"pushAllowlist": []string{cfg.FirebaseUID, collabUID},
+	}); err != nil {
+		return fmt.Errorf("create BP rule: %v", err)
+	}
+
+	// Clone as collaborator and push.
+	collabPath := filepath.Join(tmpDir, "collab")
+	collabRemote := fmt.Sprintf("http://%s:%s@%s/r/%s/%s.git",
+		collabUsername, collabToken,
+		strings.Replace(cfg.BaseURL, "http://", "", 1),
+		cfg.Username, repoName)
+	if _, err := runCmd(tmpDir, "git", "clone", collabRemote, "collab"); err != nil {
+		return fmt.Errorf("collab clone: %v", err)
+	}
+	runCmd(collabPath, "git", "config", "user.name", "Collab")
+	runCmd(collabPath, "git", "config", "user.email", "collab@example.com")
+	if err := writeAndCommit(collabPath, "feature.txt", "allowlisted change\n", "feature"); err != nil {
+		return err
+	}
+	expectedSHA, err := headSHA(collabPath)
+	if err != nil {
+		return err
+	}
+	if _, err := runCmd(collabPath, "git", "push", "origin", "main"); err != nil {
+		return fmt.Errorf("allowlisted push: %v", err)
+	}
+
+	serverSHA, err := remoteHeadSHA(cfg, ownerToken, repoName, "main")
+	if err != nil {
+		return fmt.Errorf("ls-remote: %v", err)
+	}
+	if serverSHA != expectedSHA {
+		return fmt.Errorf("allowlisted push not synced: server SHA %s, expected %s", serverSHA, expectedSHA)
+	}
+	return nil
+}
+
+// testMergeBlockedByMissingApproval: scenario 4.
+// Rule on `main` requires 1 approval. PR with zero approvals must 403 on merge.
+func testMergeBlockedByMissingApproval(cfg Config, token string) error {
+	repoName := "e2e-bp-approve-" + randomHex(3)
+	if err := setupRepoWithPR(cfg, token, repoName, ""); err != nil {
+		return err
+	}
+	if _, err := createBranchProtectionRule(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, map[string]interface{}{
+		"pattern":          "main",
+		"requireApprovals": 1,
+	}); err != nil {
+		return fmt.Errorf("create BP rule: %v", err)
+	}
+
+	status, body, err := mergePR(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, 1)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusForbidden {
+		return fmt.Errorf("expected 403 on merge w/o approval, got %d: %s", status, body)
+	}
+	return nil
+}
+
+// testMergeBlockedByMissingCodeownerApproval: scenario 5.
+// Rule requires codeowner approval, the PR has approvals but none from a
+// codeowner. Merge must 403.
+func testMergeBlockedByMissingCodeownerApproval(cfg Config, token string) error {
+	repoName := "e2e-bp-coderule-" + randomHex(3)
+
+	// CODEOWNERS file must exist on the target branch (main) before the PR is
+	// opened so that resolveCodeOwnersForPR records the codeowner usernames.
+	codeOwnerUsername := "e2e-codeowner-" + randomHex(3)
+	codeOwnerUID := "e2e_codeowner_" + randomHex(3)
+	if err := testUserRegistration(cfg.BaseURL, codeOwnerUID, codeOwnerUsername); err != nil {
+		return fmt.Errorf("register codeowner: %v", err)
+	}
+	if err := setupRepoWithPR(cfg, token, repoName, codeOwnerUsername); err != nil {
+		return err
+	}
+	if err := addCollaborator(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, codeOwnerUsername); err != nil {
+		return fmt.Errorf("add codeowner as collaborator: %v", err)
+	}
+
+	if _, err := createBranchProtectionRule(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, map[string]interface{}{
+		"pattern":                  "main",
+		"requireApprovals":         1,
+		"requireCodeownerApproval": true,
+	}); err != nil {
+		return fmt.Errorf("create BP rule: %v", err)
+	}
+
+	// A non-codeowner approves. Provision another user to do so since the PR
+	// author (owner) cannot self-approve.
+	approverUID := "e2e_approver_" + randomHex(3)
+	approverUsername := "e2e-approver-" + randomHex(3)
+	if err := testUserRegistration(cfg.BaseURL, approverUID, approverUsername); err != nil {
+		return fmt.Errorf("register approver: %v", err)
+	}
+	if err := submitReview(cfg.BaseURL, approverUID, cfg.Username, repoName, 1, "approved"); err != nil {
+		return fmt.Errorf("approver review: %v", err)
+	}
+
+	status, body, err := mergePR(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, 1)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusForbidden {
+		return fmt.Errorf("expected 403 on merge w/o codeowner approval, got %d: %s", status, body)
+	}
+	return nil
+}
+
+// testMergeSucceedsAfterCodeownerApproval: scenario 6.
+// Rule requires codeowner approval. Codeowner reviews "approved" then merge
+// returns 200.
+func testMergeSucceedsAfterCodeownerApproval(cfg Config, token string) error {
+	repoName := "e2e-bp-merge-ok-" + randomHex(3)
+
+	codeOwnerUsername := "e2e-codeowner-ok-" + randomHex(3)
+	codeOwnerUID := "e2e_codeowner_ok_" + randomHex(3)
+	if err := testUserRegistration(cfg.BaseURL, codeOwnerUID, codeOwnerUsername); err != nil {
+		return fmt.Errorf("register codeowner: %v", err)
+	}
+	if err := setupRepoWithPR(cfg, token, repoName, codeOwnerUsername); err != nil {
+		return err
+	}
+	if err := addCollaborator(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, codeOwnerUsername); err != nil {
+		return fmt.Errorf("add codeowner as collaborator: %v", err)
+	}
+
+	if _, err := createBranchProtectionRule(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, map[string]interface{}{
+		"pattern":                  "main",
+		"requireApprovals":         1,
+		"requireCodeownerApproval": true,
+	}); err != nil {
+		return fmt.Errorf("create BP rule: %v", err)
+	}
+
+	if err := submitReview(cfg.BaseURL, codeOwnerUID, cfg.Username, repoName, 1, "approved"); err != nil {
+		return fmt.Errorf("codeowner review: %v", err)
+	}
+
+	status, body, err := mergePR(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, 1)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("expected 200 on merge after codeowner approval, got %d: %s", status, body)
+	}
+	return nil
+}
+
+// ----------------------------------------------------
+// TIER 5 HELPERS
+// ----------------------------------------------------
+
+// setupRepoWithPR creates a fresh repo, seeds an initial commit on main
+// (optionally containing a CODEOWNERS file assigning ownership of `feature/*`
+// to codeownerUsername), pushes a `feature` branch with a change under
+// `feature/`, and opens PR #1 main <- feature. The PR author is the configured
+// owner.
+func setupRepoWithPR(cfg Config, token, repoName, codeownerUsername string) error {
+	if err := testRepoCreation(cfg.BaseURL, cfg.FirebaseUID, repoName, "public"); err != nil {
+		return fmt.Errorf("create repo: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "bp-pr-*")
+	if err != nil {
+		return err
+	}
+	// Caller's responsibility: we let the OS clean /tmp; otherwise we'd need
+	// to keep the dir alive past the helper. Push has already synced to GCS.
+	defer os.RemoveAll(tmpDir)
+
+	localPath := filepath.Join(tmpDir, "local")
+	if err := initLocalRepo(localPath); err != nil {
+		return err
+	}
+	if err := writeAndCommit(localPath, "README.md", "# seed\n", "seed"); err != nil {
+		return err
+	}
+	if codeownerUsername != "" {
+		content := fmt.Sprintf("feature/* @%s\n", codeownerUsername)
+		if err := writeAndCommit(localPath, "CODEOWNERS", content, "add CODEOWNERS"); err != nil {
+			return err
+		}
+	}
+
+	remoteURL := buildRemoteURL(cfg, token, repoName)
+	if _, err := runCmd(localPath, "git", "remote", "add", "origin", remoteURL); err != nil {
+		return err
+	}
+	if _, err := runCmd(localPath, "git", "push", "origin", "main"); err != nil {
+		return fmt.Errorf("push main: %v", err)
+	}
+
+	// Create feature branch with a change inside feature/ (for CODEOWNERS path
+	// matching).
+	if _, err := runCmd(localPath, "git", "checkout", "-b", "feature"); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(localPath, "feature"), 0755); err != nil {
+		return err
+	}
+	if err := writeAndCommit(localPath, filepath.Join("feature", "f.txt"), "feature change\n", "feature change"); err != nil {
+		return err
+	}
+	if _, err := runCmd(localPath, "git", "push", "origin", "feature"); err != nil {
+		return fmt.Errorf("push feature: %v", err)
+	}
+
+	// Open PR #1: main <- feature (owner-authored).
+	if err := openPR(cfg.BaseURL, cfg.FirebaseUID, cfg.Username, repoName, "feature", "main", "PR for BP test"); err != nil {
+		return fmt.Errorf("open PR: %v", err)
+	}
+	return nil
+}
+
+// initLocalRepo runs `git init` with an opinionated identity so commits don't
+// fail under CI environments missing user.name/email.
+func initLocalRepo(path string) error {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return err
+	}
+	if _, err := runCmd(path, "git", "init", "-b", "main"); err != nil {
+		return err
+	}
+	runCmd(path, "git", "config", "user.name", "E2E BP")
+	runCmd(path, "git", "config", "user.email", "bp@example.com")
+	return nil
+}
+
+// writeAndCommit writes a file (creating parents) and stages+commits it.
+func writeAndCommit(repo, relPath, content, msg string) error {
+	full := filepath.Join(repo, relPath)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+		return err
+	}
+	if _, err := runCmd(repo, "git", "add", relPath); err != nil {
+		return err
+	}
+	if _, err := runCmd(repo, "git", "commit", "-m", msg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// headSHA returns the resolved SHA at HEAD of `repo`.
+func headSHA(repo string) (string, error) {
+	out, err := runCmd(repo, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// buildRemoteURL composes the basic-auth Git HTTP URL for the owner.
+func buildRemoteURL(cfg Config, token, repoName string) string {
+	clean := strings.Replace(cfg.BaseURL, "http://", "", 1)
+	return fmt.Sprintf("http://%s:%s@%s/r/%s/%s.git", cfg.Username, token, clean, cfg.Username, repoName)
+}
+
+// remoteHeadSHA runs ls-remote against the server to discover the server-side
+// SHA of refs/heads/<branch>. Returns "" if the ref is absent.
+func remoteHeadSHA(cfg Config, token, repoName, branch string) (string, error) {
+	url := buildRemoteURL(cfg, token, repoName)
+	out, err := runCmd(os.TempDir(), "git", "ls-remote", url, "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	line := strings.TrimSpace(out)
+	if line == "" {
+		return "", nil
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 1 {
+		return "", fmt.Errorf("unexpected ls-remote output: %q", out)
+	}
+	return fields[0], nil
+}
+
+// createBranchProtectionRule POSTs a rule (owner auth). Returns the created
+// rule's ID (best-effort; empty string if the server didn't echo one).
+func createBranchProtectionRule(baseURL, ownerUID, owner, repo string, payload map[string]interface{}) (string, error) {
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("%s/api/repos/%s/%s/branch-protection", baseURL, owner, repo),
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer mock_"+ownerUID)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
+	}
+	var out map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if id, ok := out["id"].(string); ok {
+		return id, nil
+	}
+	return "", nil
+}
+
+// addCollaborator POSTs to the collaborators endpoint as the repo owner.
+func addCollaborator(baseURL, ownerUID, owner, repo, username string) error {
+	body, _ := json.Marshal(map[string]string{"username": username})
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("%s/api/repos/%s/%s/collaborators", baseURL, owner, repo),
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer mock_"+ownerUID)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// createPATForUser generates a fresh PAT for the given user UID.
+func createPATForUser(baseURL, uid, name string) (string, error) {
+	body, _ := json.Marshal(map[string]string{"name": name})
+	req, _ := http.NewRequest("POST", baseURL+"/api/tokens", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
+	}
+	var tr TokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return "", err
+	}
+	if tr.Token == "" {
+		return "", fmt.Errorf("empty token returned")
+	}
+	return tr.Token, nil
+}
+
+// openPR creates a PR as the given user. PR number is assigned by the server;
+// the first PR in a fresh repo is #1, which the merge scenarios rely on.
+func openPR(baseURL, uid, owner, repo, source, target, title string) error {
+	body, _ := json.Marshal(map[string]string{
+		"title":        title,
+		"sourceBranch": source,
+		"targetBranch": target,
+	})
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("%s/api/repos/%s/%s/pulls", baseURL, owner, repo),
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// submitReview POSTs an approval (or other state) on PR `number` as user `uid`.
+func submitReview(baseURL, uid, owner, repo string, number int, state string) error {
+	body, _ := json.Marshal(map[string]string{"state": state, "body": "lgtm"})
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("%s/api/repos/%s/%s/pulls/%d/reviews", baseURL, owner, repo, number),
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// mergePR POSTs the merge endpoint and returns (status, body, err) so the
+// caller can assert specifically on 403 or 200 without a redirection helper.
+func mergePR(baseURL, uid, owner, repo string, number int) (int, string, error) {
+	req, _ := http.NewRequest("POST",
+		fmt.Sprintf("%s/api/repos/%s/%s/pulls/%d/merge", baseURL, owner, repo, number),
+		bytes.NewBuffer([]byte("{}")))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b), nil
 }
 
 // ----------------------------------------------------

@@ -13,10 +13,12 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/firestore"
 	"github.com/go-chi/chi/v5"
 
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
+	gitpkg "gitbucket/internal/git"
 )
 
 func TestPullRequestAPIs(t *testing.T) {
@@ -353,3 +355,250 @@ func TestPullRequestAPIs(t *testing.T) {
 		}
 	})
 }
+
+// setupMergeGateFixture builds an isolated repo (registered in Firestore +
+// materialized on disk) with a `main` branch and a `feat` branch carrying a
+// single file change. It returns the chi router, the username/repoName/PR
+// number, the uid, and a path to the bare repo. Each call uses a unique
+// suffix so tests can run against the same emulator without stepping on
+// each other.
+func setupMergeGateFixture(t *testing.T, ctx context.Context, dbClient *firestore.Client) (
+	router *chi.Mux, owner, repoName string, uid string, prNumber int, barePath string,
+) {
+	t.Helper()
+
+	tempReposRoot, err := os.MkdirTemp("", "gitbucket-mergegate-repos-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tempReposRoot) })
+
+	authH := auth.NewAuthHandler(true, nil, dbClient)
+	apiH := NewAPIHandler(dbClient, nil, "", tempReposRoot, authH)
+	r := chi.NewRouter()
+	apiH.RegisterRoutes(r)
+
+	suffix := randSuffix()
+	uid = "mg-uid-" + suffix
+	owner = "mg-user-" + suffix
+	repoName = "mg-repo-" + suffix
+
+	// Register username
+	regBody, _ := json.Marshal(map[string]string{"username": owner})
+	req := httptest.NewRequest("POST", "/api/user/username", bytes.NewBuffer(regBody))
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("register username: %d %s", rr.Code, rr.Body.String())
+	}
+
+	if err := db.CreateRepositoryMetadata(ctx, dbClient, uid, owner, repoName, "", "public"); err != nil {
+		t.Fatalf("create repo meta: %v", err)
+	}
+
+	// Build a working repo with main + feat branches.
+	workDir, err := os.MkdirTemp("", "gitbucket-mergegate-work-*")
+	if err != nil {
+		t.Fatalf("workdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(workDir) })
+
+	runG := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = workDir
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git %s: %v %s", strings.Join(args, " "), err, stderr.String())
+		}
+	}
+	runG("init")
+	runG("config", "user.name", "T")
+	runG("config", "user.email", "t@example.com")
+	_ = os.WriteFile(filepath.Join(workDir, "file.txt"), []byte("a\n"), 0644)
+	runG("add", ".")
+	runG("commit", "-m", "init")
+	_ = exec.Command("git", "-C", workDir, "branch", "-M", "main").Run()
+	runG("checkout", "-b", "feat")
+	_ = os.WriteFile(filepath.Join(workDir, "file.txt"), []byte("a\nb\n"), 0644)
+	runG("commit", "-am", "feat")
+
+	barePath = filepath.Join(tempReposRoot, strings.ToLower(owner), repoName+".git")
+	if err := os.MkdirAll(filepath.Dir(barePath), 0755); err != nil {
+		t.Fatalf("mkdir bare parent: %v", err)
+	}
+	if err := exec.Command("git", "clone", "--bare", workDir, barePath).Run(); err != nil {
+		t.Fatalf("clone bare: %v", err)
+	}
+	if err := db.UpdateRepositoryMetadata(ctx, dbClient, owner, repoName, map[string]interface{}{
+		"branches": []string{"main", "feat"},
+	}); err != nil {
+		t.Fatalf("update branches: %v", err)
+	}
+
+	// Open a PR feat -> main.
+	prBody, _ := json.Marshal(map[string]string{
+		"title": "T", "description": "D", "sourceBranch": "feat", "targetBranch": "main",
+	})
+	req = httptest.NewRequest("POST", "/api/repos/"+owner+"/"+repoName+"/pulls", bytes.NewBuffer(prBody))
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create PR: %d %s", rr.Code, rr.Body.String())
+	}
+	var pr db.PullRequest
+	_ = json.NewDecoder(rr.Body).Decode(&pr)
+	return r, owner, repoName, uid, pr.Number, barePath
+}
+
+func TestMergePullRequest_BlockedByApprovals(t *testing.T) {
+	emulatorHost := os.Getenv("FIRESTORE_EMULATOR_HOST")
+	if emulatorHost == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	client, err := db.NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("db client: %v", err)
+	}
+	defer client.Close()
+
+	r, owner, repoName, uid, prNum, _ := setupMergeGateFixture(t, ctx, client)
+
+	// Rule on main requiring 1 approval.
+	if _, err := db.CreateRule(ctx, client, owner, repoName, gitpkg.Rule{
+		Pattern: "main", RequireApprovals: 1,
+	}); err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+
+	// Attempt merge — should be 403.
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/repos/%s/%s/pulls/%d/merge", owner, repoName, prNum), nil)
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 (need approvals), got %d %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "requires 1 approvals") {
+		t.Errorf("expected approvals-required message, got %q", rr.Body.String())
+	}
+}
+
+func TestMergePullRequest_BlockedByCodeownerApproval(t *testing.T) {
+	emulatorHost := os.Getenv("FIRESTORE_EMULATOR_HOST")
+	if emulatorHost == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	client, err := db.NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("db client: %v", err)
+	}
+	defer client.Close()
+
+	r, owner, repoName, uid, prNum, _ := setupMergeGateFixture(t, ctx, client)
+
+	// Seed a non-author approval so the count-only gate would pass — but
+	// require-codeowner is true and the approver is NOT a codeowner.
+	approverUID := "approver-" + randSuffix()
+	if err := db.UpsertReview(ctx, client, owner, repoName, prNum, db.Review{
+		UID: approverUID, Username: "approver", State: "approved", Body: "lgtm",
+	}); err != nil {
+		t.Fatalf("UpsertReview: %v", err)
+	}
+
+	if _, err := db.CreateRule(ctx, client, owner, repoName, gitpkg.Rule{
+		Pattern: "main", RequireApprovals: 1, RequireCodeownerApproval: true,
+	}); err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+
+	// PR has no requestedReviewers (no CODEOWNERS file in repo), so the
+	// codeowner gate must reject regardless of the approval count.
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/repos/%s/%s/pulls/%d/merge", owner, repoName, prNum), nil)
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 (codeowner), got %d %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "codeowner") {
+		t.Errorf("expected codeowner message, got %q", rr.Body.String())
+	}
+}
+
+func TestMergePullRequest_AllowedWithApprovalAndCodeowner(t *testing.T) {
+	emulatorHost := os.Getenv("FIRESTORE_EMULATOR_HOST")
+	if emulatorHost == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	client, err := db.NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("db client: %v", err)
+	}
+	defer client.Close()
+
+	r, owner, repoName, uid, prNum, _ := setupMergeGateFixture(t, ctx, client)
+
+	// Pretend that "reviewer" is a CODEOWNER for this PR by writing it
+	// directly to requestedReviewers. (D5 normally does this from the diff;
+	// this fixture skips checking the diff and seeds the field directly.)
+	if err := db.UpdatePullRequestReviewers(ctx, client, owner, repoName, prNum, []string{"reviewer"}); err != nil {
+		t.Fatalf("UpdatePullRequestReviewers: %v", err)
+	}
+	// "reviewer" approves.
+	if err := db.UpsertReview(ctx, client, owner, repoName, prNum, db.Review{
+		UID: "rev-uid-" + randSuffix(), Username: "reviewer", State: "approved", Body: "lgtm",
+	}); err != nil {
+		t.Fatalf("UpsertReview: %v", err)
+	}
+
+	if _, err := db.CreateRule(ctx, client, owner, repoName, gitpkg.Rule{
+		Pattern: "main", RequireApprovals: 1, RequireCodeownerApproval: true,
+	}); err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/repos/%s/%s/pulls/%d/merge", owner, repoName, prNum), nil)
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 (merge allowed), got %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMergePullRequest_BlockedByMergeAllowlist(t *testing.T) {
+	emulatorHost := os.Getenv("FIRESTORE_EMULATOR_HOST")
+	if emulatorHost == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	client, err := db.NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("db client: %v", err)
+	}
+	defer client.Close()
+
+	r, owner, repoName, uid, prNum, _ := setupMergeGateFixture(t, ctx, client)
+
+	// Allowlist contains some other user's uid — owner is not on it.
+	if _, err := db.CreateRule(ctx, client, owner, repoName, gitpkg.Rule{
+		Pattern: "main", MergeAllowlist: []string{"someone-else-uid"},
+	}); err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/repos/%s/%s/pulls/%d/merge", owner, repoName, prNum), nil)
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 (merge allowlist), got %d %s", rr.Code, rr.Body.String())
+	}
+}
+

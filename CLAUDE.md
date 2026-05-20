@@ -62,3 +62,4 @@ The committed `.env` is the dev config; production secrets live in Cloud Run env
 - Username regex `^[a-zA-Z0-9-]{3,20}$`; repo name regex `^[a-zA-Z0-9-_]{3,30}$` (`internal/api/api.go`). Validation errors return 400 — keep both backend and frontend in sync if you change them.
 - The REST contract is enumerated in `PROJECT.md` §Interface Contracts; treat that document as the source of truth for response shapes the frontend expects.
 - `frontend/lint_output.txt` is a transient artifact and should not be committed (it currently is, untracked).
+- GCS object versioning is intentionally disabled — Git objects are content-addressed. See `PROJECT.md` §GCS. Soft-delete (7d) is the recovery mechanism.

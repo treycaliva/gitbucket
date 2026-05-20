@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../apiClient';
-import { 
-  Folder, 
-  FileCode, 
-  GitBranch, 
-  Copy, 
-  Check, 
-  Layers, 
-  Clock, 
-  Settings as SettingsIcon, 
-  ArrowLeft, 
+import BranchProtectionModal from '../components/BranchProtectionModal';
+import {
+  Folder,
+  FileCode,
+  GitBranch,
+  Copy,
+  Check,
+  Layers,
+  Clock,
+  Settings as SettingsIcon,
+  ArrowLeft,
   FileText,
   Trash2,
   Lock,
@@ -19,6 +20,53 @@ import {
   MessageSquare,
   GitMerge
 } from 'lucide-react';
+
+function QuickstartCard({ cloneUrl, username }) {
+  return (
+    <div className="glass-card">
+      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Repository Command Quickstart</h3>
+      <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
+        Configure your local command-line client to push and pull from this repository:
+      </p>
+      <pre style={{
+        background: 'rgba(0,0,0,0.4)',
+        border: '1px solid var(--border-color)',
+        padding: '1.25rem',
+        borderRadius: '6px',
+        fontFamily: 'var(--font-mono)',
+        fontSize: '0.85rem',
+        color: '#e2e8f0',
+        lineHeight: '1.6',
+        whiteSpace: 'pre'
+      }}>
+{`# 1. Initialize a new git directory locally
+git init
+git checkout -b main
+
+# 2. Add files and commit
+git add .
+git commit -m "initial commit"
+
+# 3. Link remote repository
+git remote add origin ${cloneUrl}
+
+# 4. Push to Cloud Run (use your Username and PAT when prompted)
+git push -u origin main`}
+      </pre>
+      <div style={{
+        marginTop: '1rem',
+        padding: '0.75rem 1rem',
+        background: 'rgba(245, 158, 11, 0.08)',
+        border: '1px solid rgba(245, 158, 11, 0.2)',
+        borderRadius: '6px',
+        color: '#f59e0b',
+        fontSize: '0.85rem'
+      }}>
+        <strong>Note:</strong> When git asks you for credentials on push, use your username (<strong>{username}</strong>) and your generated <strong>Personal Access Token (PAT)</strong> as the password. Standard Firebase account passwords will not work on the command line.
+      </div>
+    </div>
+  );
+}
 
 export default function Repository({ user, owner, repo, initialTab = 'code', initialPath = '', prNumber, onNavigate }) {
   const [meta, setMeta] = useState(null);
@@ -37,6 +85,7 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   
   // Loaded Contents
   const [treeItems, setTreeItems] = useState([]);
+  const [codeowners, setCodeowners] = useState({}); // map: entry name → ["@alice", ...]
   const [fileContent, setFileContent] = useState('');
   const [commits, setCommits] = useState([]);
   const [readmeContent, setReadmeContent] = useState('');
@@ -57,6 +106,17 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [autoDeleteBranches, setAutoDeleteBranches] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
+
+  // Collaborators state
+  const [collaborators, setCollaborators] = useState([]);
+  const [newCollabUsername, setNewCollabUsername] = useState('');
+  const [collaboratorError, setCollaboratorError] = useState('');
+
+  // Branch protection state
+  const [protectionRules, setProtectionRules] = useState([]);
+  const [protectionError, setProtectionError] = useState('');
+  const [showProtectionModal, setShowProtectionModal] = useState(false);
+  const [editingRule, setEditingRule] = useState(null); // null => create mode
 
   useEffect(() => {
     if (meta) {
@@ -90,6 +150,76 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
 
   const cloneUrl = `${window.location.origin}/r/${owner}/${repo}.git`;
   const isOwner = user && user.username && user.username.toLowerCase() === owner.toLowerCase();
+
+  // Load collaborators when entering Settings tab as owner
+  useEffect(() => {
+    if (activeTab !== 'settings' || !isOwner) return;
+    apiClient.get(`/api/repos/${owner}/${repo}/collaborators`)
+      .then((data) => setCollaborators(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [owner, repo, activeTab, isOwner]);
+
+  const addCollaborator = async () => {
+    setCollaboratorError('');
+    try {
+      await apiClient.post(`/api/repos/${owner}/${repo}/collaborators`, {
+        username: newCollabUsername.trim(),
+      });
+      setNewCollabUsername('');
+      const list = await apiClient.get(`/api/repos/${owner}/${repo}/collaborators`);
+      setCollaborators(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setCollaboratorError(err.message || 'Failed to add');
+    }
+  };
+
+  const removeCollaborator = async (username) => {
+    try {
+      await apiClient.delete(`/api/repos/${owner}/${repo}/collaborators/${username}`);
+      setCollaborators((prev) => prev.filter((c) => c.username !== username));
+    } catch (err) {
+      setCollaboratorError(err.message || 'Failed to remove');
+    }
+  };
+
+  // Load branch protection rules when entering Settings as owner
+  useEffect(() => {
+    if (activeTab !== 'settings' || !isOwner) return;
+    apiClient.get(`/api/repos/${owner}/${repo}/branch-protection`)
+      .then((data) => setProtectionRules(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [owner, repo, activeTab, isOwner]);
+
+  const refetchProtectionRules = async () => {
+    try {
+      const list = await apiClient.get(`/api/repos/${owner}/${repo}/branch-protection`);
+      setProtectionRules(Array.isArray(list) ? list : []);
+    } catch {
+      // leave existing list; surface error elsewhere
+    }
+  };
+
+  const handleProtectionSubmit = async (rule) => {
+    setProtectionError('');
+    if (rule.id) {
+      await apiClient.put(`/api/repos/${owner}/${repo}/branch-protection/${rule.id}`, rule);
+    } else {
+      await apiClient.post(`/api/repos/${owner}/${repo}/branch-protection`, rule);
+    }
+    await refetchProtectionRules();
+    setShowProtectionModal(false);
+    setEditingRule(null);
+  };
+
+  const handleProtectionDelete = async (ruleId) => {
+    setProtectionError('');
+    try {
+      await apiClient.delete(`/api/repos/${owner}/${repo}/branch-protection/${ruleId}`);
+      await refetchProtectionRules();
+    } catch (err) {
+      setProtectionError(err.message || 'Failed to delete rule.');
+    }
+  };
 
   // 1. Load Repository Metadata
   useEffect(() => {
@@ -142,7 +272,23 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
             // Load Directory Tree
             const items = await apiClient.get(`/api/repos/${owner}/${repo}/tree/${currentBranch}/${currentPath}`);
             setTreeItems(items);
-            
+
+            // Load CODEOWNERS map for the current directory (skip when empty).
+            if (items && items.length > 0) {
+              const params = new URLSearchParams({
+                path: currentPath || '',
+                ref: currentBranch,
+              });
+              try {
+                const co = await apiClient.get(`/api/repos/${owner}/${repo}/codeowners?${params.toString()}`);
+                setCodeowners((co && co.entries) || {});
+              } catch {
+                setCodeowners({});
+              }
+            } else {
+              setCodeowners({});
+            }
+
             // Look for README.md in the root directory
             const readmeFile = items.find(item => item.type === 'blob' && item.name.toLowerCase() === 'readme.md');
             if (readmeFile && !currentPath) {
@@ -544,20 +690,28 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                       <>
                         {/* Folders first */}
                         {treeItems.filter(item => item.type === 'tree').map(item => (
-                          <div 
-                            key={item.path} 
+                          <div
+                            key={item.path}
                             className="file-row"
                             onClick={() => handleDirectoryClick(item.path)}
                           >
                             <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
                             <span className="file-name" style={{ fontWeight: 500 }}>{item.name}</span>
+                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                              <span
+                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
+                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
+                              >
+                                {codeowners[item.name].join(' ')}
+                              </span>
+                            )}
                             <span className="file-size">-</span>
                           </div>
                         ))}
                         {/* Blobs second */}
                         {treeItems.filter(item => item.type === 'blob').map(item => (
-                          <div 
-                            key={item.path} 
+                          <div
+                            key={item.path}
                             className="file-row"
                             onClick={() => handleFileClick(item)}
                           >
@@ -565,12 +719,27 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                               {item.name.toLowerCase() === 'readme.md' ? <FileText size={18} style={{ color: '#a78bfa' }} /> : <FileCode size={18} style={{ color: '#94a3b8' }} />}
                             </span>
                             <span className="file-name">{item.name}</span>
+                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                              <span
+                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
+                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
+                              >
+                                {codeowners[item.name].join(' ')}
+                              </span>
+                            )}
                             <span className="file-size">{(item.size / 1024).toFixed(1)} KB</span>
                           </div>
                         ))}
                       </>
                     )}
                   </div>
+
+                  {/* Quickstart for empty repo (owner only) */}
+                  {isOwner && commits.length === 0 && (
+                    <div style={{ marginTop: '1.5rem' }}>
+                      <QuickstartCard cloneUrl={cloneUrl} username={user.username} />
+                    </div>
+                  )}
 
                   {/* README Renderer */}
                   {readmeContent && (
@@ -622,48 +791,127 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           {/* Settings Tab (Owner Only) */}
           {activeTab === 'settings' && isOwner && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-              {/* Repository Setup Quickstart */}
+              {/* Collaborators */}
               <div className="glass-card">
-                <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Repository Command Quickstart</h3>
+                <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Collaborators</h3>
                 <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                  Configure your local command-line client to push and pull from this repository:
+                  Users with push and read access to this repository.
                 </p>
-                <pre style={{
-                  background: 'rgba(0,0,0,0.4)',
-                  border: '1px solid var(--border-color)',
-                  padding: '1.25rem',
-                  borderRadius: '6px',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.85rem',
-                  color: '#e2e8f0',
-                  lineHeight: '1.6',
-                  whiteSpace: 'pre'
-                }}>
-                  {`# 1. Initialize a new git directory locally
-git init
-git checkout -b main
-
-# 2. Add files and commit
-git add .
-git commit -m "initial commit"
-
-# 3. Link remote repository
-git remote add origin ${cloneUrl}
-
-# 4. Push to Cloud Run (use your Username and PAT when prompted)
-git push -u origin main`}
-                </pre>
-                <div style={{
-                  marginTop: '1rem',
-                  padding: '0.75rem 1rem',
-                  background: 'rgba(245, 158, 11, 0.08)',
-                  border: '1px solid rgba(245, 158, 11, 0.2)',
-                  borderRadius: '6px',
-                  color: '#f59e0b',
-                  fontSize: '0.85rem'
-                }}>
-                  <strong>Note:</strong> When git asks you for credentials on push, use your username (<strong>{user.username}</strong>) and your generated <strong>Personal Access Token (PAT)</strong> as the password. Standard Firebase account passwords will not work on the command line.
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <input
+                    className="text-input"
+                    placeholder="username"
+                    value={newCollabUsername}
+                    onChange={(e) => setNewCollabUsername(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn" onClick={addCollaborator} disabled={!newCollabUsername.trim()}>Add</button>
                 </div>
+                {collaboratorError && <div style={{ color: '#ef4444', marginBottom: '0.5rem' }}>{collaboratorError}</div>}
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {collaborators.map((c) => (
+                    <li key={c.uid} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                      <span>{c.username}</span>
+                      <button className="btn-ghost" onClick={() => removeCollaborator(c.username)}>Remove</button>
+                    </li>
+                  ))}
+                  {collaborators.length === 0 && <li style={{ color: '#64748b' }}>No collaborators yet.</li>}
+                </ul>
+              </div>
+
+              {/* Branch protection */}
+              <div className="glass-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.25rem', margin: 0, color: '#38bdf8' }}>Branch protection</h3>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => { setEditingRule(null); setShowProtectionModal(true); }}
+                    style={{ padding: '0.4rem 0.9rem', fontSize: '0.85rem' }}
+                  >
+                    Add rule
+                  </button>
+                </div>
+                <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                  Restrict who can push or merge to matching branches, require pull requests, and block destructive operations.
+                </p>
+                {protectionError && (
+                  <div style={{ color: '#ef4444', marginBottom: '0.75rem', fontSize: '0.85rem' }}>{protectionError}</div>
+                )}
+                {protectionRules.length === 0 ? (
+                  <div style={{ color: '#64748b', fontSize: '0.9rem', padding: '0.5rem 0' }}>
+                    No branch protection rules. Click "Add rule" to create one.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                      <thead>
+                        <tr style={{ textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid var(--border-color)' }}>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Pattern</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Push</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Merge</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Toggles</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {protectionRules.map((r) => {
+                          const badges = [];
+                          if (r.requirePullRequest) badges.push('PR required');
+                          if (r.requireApprovals && r.requireApprovals > 0) badges.push(`${r.requireApprovals} approval${r.requireApprovals === 1 ? '' : 's'}`);
+                          if (r.requireCodeownerApproval) badges.push('Code-owner');
+                          if (r.blockForcePush) badges.push('No force push');
+                          if (r.blockDeletion) badges.push('No delete');
+                          return (
+                            <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '0.6rem 0.5rem', fontFamily: 'var(--font-mono)', color: '#e2e8f0' }}>{r.pattern}</td>
+                              <td style={{ padding: '0.6rem 0.5rem', color: '#cbd5e1' }}>
+                                {Array.isArray(r.pushAllowlist) ? r.pushAllowlist.length : 0}
+                              </td>
+                              <td style={{ padding: '0.6rem 0.5rem', color: '#cbd5e1' }}>
+                                {Array.isArray(r.mergeAllowlist) ? r.mergeAllowlist.length : 0}
+                              </td>
+                              <td style={{ padding: '0.6rem 0.5rem' }}>
+                                {badges.length === 0 ? (
+                                  <span style={{ color: '#64748b', fontSize: '0.8rem' }}>—</span>
+                                ) : (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                    {badges.map((b) => (
+                                      <span key={b} style={{
+                                        background: 'rgba(56, 189, 248, 0.12)',
+                                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                                        color: '#38bdf8',
+                                        padding: '0.1rem 0.5rem',
+                                        borderRadius: '999px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 500,
+                                      }}>{b}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => { setEditingRule(r); setShowProtectionModal(true); }}
+                                  style={{ marginRight: '0.5rem' }}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => { if (window.confirm(`Delete rule for "${r.pattern}"?`)) handleProtectionDelete(r.id); }}
+                                  style={{ color: '#ef4444' }}
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {/* Repository Settings */}
@@ -795,6 +1043,19 @@ git push -u origin main`}
             <PullRequestDetail owner={owner} repo={repo} prNumber={prNumber} meta={meta} onNavigate={onNavigate} user={user} />
           )}
         </>
+      )}
+
+      {/* Branch Protection Modal */}
+      {showProtectionModal && (
+        <BranchProtectionModal
+          key={editingRule ? `edit-${editingRule.id}` : 'create'}
+          mode={editingRule ? 'edit' : 'create'}
+          initialRule={editingRule}
+          owner={owner}
+          collaborators={collaborators}
+          onClose={() => { setShowProtectionModal(false); setEditingRule(null); }}
+          onSubmit={handleProtectionSubmit}
+        />
       )}
     </div>
   );
@@ -1121,7 +1382,14 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
   const [repoBranches, setRepoBranches] = useState([]);
   const [deletingBranch, setDeletingBranch] = useState(false);
 
+  // Reviews
+  const [reviews, setReviews] = useState([]);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState('');
+  const [reviewBody, setReviewBody] = useState('');
+
   const isOwner = user && user.username && user.username.toLowerCase() === owner.toLowerCase();
+  const isPrAuthor = user && user.username && pr && pr.authorUsername && user.username.toLowerCase() === pr.authorUsername.toLowerCase();
 
   useEffect(() => {
     if (meta) {
@@ -1152,15 +1420,17 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
       setLoading(true);
       setError('');
       try {
-        const [prData, commitsData, diffData] = await Promise.all([
+        const [prData, commitsData, diffData, reviewsData] = await Promise.all([
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}`),
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/commits`).catch(() => []),
-          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' }))
+          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' })),
+          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`).catch(() => [])
         ]);
 
         setPr(prData);
         setCommits(commitsData || []);
         setDiff(diffData?.rawDiff || '');
+        setReviews(Array.isArray(reviewsData) ? reviewsData : []);
 
         const saved = localStorage.getItem(`pr_comments_${owner}_${repo}_${prNumber}`);
         if (saved) {
@@ -1177,6 +1447,32 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 
     loadPrDetails();
   }, [owner, repo, prNumber]);
+
+  const refetchReviews = async () => {
+    try {
+      const list = await apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`);
+      setReviews(Array.isArray(list) ? list : []);
+    } catch {
+      // Keep prior list on transient failure; surface error via reviewError separately.
+    }
+  };
+
+  const handleSubmitReview = async (state) => {
+    setReviewError('');
+    setReviewSubmitting(state);
+    try {
+      await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`, {
+        state,
+        body: reviewBody,
+      });
+      setReviewBody('');
+      await refetchReviews();
+    } catch (err) {
+      setReviewError(err.message || 'Failed to submit review.');
+    } finally {
+      setReviewSubmitting('');
+    }
+  };
 
   const handleAddComment = (e) => {
     e.preventDefault();
@@ -1597,6 +1893,122 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 
           {/* Right Column: Metadata / info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Reviewers */}
+            <div className="glass-card" style={{ padding: '1.25rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Reviewers</h3>
+              {(() => {
+                // Build a single ordered list:
+                //   1) requestedReviewers (in their declared order)
+                //   2) any users who have submitted a review but are NOT in #1
+                // For each, look up the latest review (if any) to render their state.
+                const requested = Array.isArray(pr.requestedReviewers) ? pr.requestedReviewers : [];
+                const byUsername = new Map();
+                for (const rv of reviews) {
+                  // ListReviews orders ascending by submittedAt, so later entries win.
+                  byUsername.set(rv.username.toLowerCase(), rv);
+                }
+                const requestedLower = new Set(requested.map(u => u.toLowerCase()));
+                const adhoc = [];
+                for (const rv of reviews) {
+                  if (!requestedLower.has(rv.username.toLowerCase())) {
+                    adhoc.push(rv.username);
+                  }
+                }
+                // De-dupe adhoc (multiple reviews per user collapse).
+                const seen = new Set();
+                const adhocUnique = adhoc.filter(u => {
+                  const k = u.toLowerCase();
+                  if (seen.has(k)) return false;
+                  seen.add(k);
+                  return true;
+                });
+                const all = [...requested, ...adhocUnique];
+
+                if (all.length === 0) {
+                  return (
+                    <div style={{ color: '#64748b', fontSize: '0.85rem' }}>
+                      No reviewers requested.
+                    </div>
+                  );
+                }
+
+                const stateLabel = (s) => {
+                  if (s === 'approved') return { text: '✓ approved', color: '#10b981' };
+                  if (s === 'changes_requested') return { text: '✕ changes requested', color: '#f43f5e' };
+                  if (s === 'commented') return { text: 'commented', color: '#94a3b8' };
+                  return { text: '– pending', color: '#64748b' };
+                };
+
+                return (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {all.map(username => {
+                      const rv = byUsername.get(username.toLowerCase());
+                      const s = stateLabel(rv && rv.state);
+                      return (
+                        <li
+                          key={username}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '0.9rem',
+                          }}
+                        >
+                          <span style={{ color: '#e2e8f0' }}>@{username}</span>
+                          <span style={{ color: s.color, fontSize: '0.85rem', fontWeight: 500 }}>{s.text}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                );
+              })()}
+
+              {/* Reviewer action buttons (visible to signed-in non-author on open PRs) */}
+              {user && pr.status === 'open' && !isPrAuthor && (
+                <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                  <textarea
+                    className="text-input"
+                    placeholder="Leave a note with your review (optional)"
+                    value={reviewBody}
+                    onChange={(e) => setReviewBody(e.target.value)}
+                    style={{ width: '100%', minHeight: '60px', marginBottom: '0.75rem', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.85rem' }}
+                  />
+                  {reviewError && (
+                    <div style={{ color: '#ef4444', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{reviewError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => handleSubmitReview('approved')}
+                      disabled={!!reviewSubmitting}
+                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                    >
+                      {reviewSubmitting === 'approved' ? 'Approving…' : 'Approve'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => handleSubmitReview('changes_requested')}
+                      disabled={!!reviewSubmitting}
+                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                    >
+                      {reviewSubmitting === 'changes_requested' ? 'Submitting…' : 'Request changes'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => handleSubmitReview('commented')}
+                      disabled={!!reviewSubmitting}
+                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                    >
+                      {reviewSubmitting === 'commented' ? 'Submitting…' : 'Comment'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="glass-card" style={{ padding: '1.25rem' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Review Status</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem' }}>

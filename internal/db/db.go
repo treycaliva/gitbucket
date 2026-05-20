@@ -122,18 +122,27 @@ type PATMetadata struct {
 	LastUsedAt *time.Time `json:"lastUsedAt" firestore:"lastUsedAt"`
 }
 
+// Collaborator represents a non-owner user with access to a repository.
+type Collaborator struct {
+	UID      string    `json:"uid" firestore:"uid"`
+	Username string    `json:"username" firestore:"username"`
+	AddedAt  time.Time `json:"addedAt" firestore:"addedAt"`
+	AddedBy  string    `json:"addedBy" firestore:"addedBy"`
+}
+
 // RepositoryMetadata holds repository details.
 type RepositoryMetadata struct {
-	OwnerUID      string    `json:"ownerUid" firestore:"ownerUid"`
-	Owner         string    `json:"owner" firestore:"owner"`
-	Name          string    `json:"name" firestore:"name"`
-	Description   string    `json:"description" firestore:"description"`
-	Visibility    string    `json:"visibility" firestore:"visibility"`
-	DefaultBranch string    `json:"defaultBranch" firestore:"defaultBranch"`
-	CreatedAt     time.Time `json:"createdAt" firestore:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt" firestore:"updatedAt"`
-	Branches               []string  `json:"branches" firestore:"branches"`
-	AutoDeleteHeadBranches bool      `json:"autoDeleteHeadBranches" firestore:"autoDeleteHeadBranches"`
+	OwnerUID               string         `json:"ownerUid" firestore:"ownerUid"`
+	Owner                  string         `json:"owner" firestore:"owner"`
+	Name                   string         `json:"name" firestore:"name"`
+	Description            string         `json:"description" firestore:"description"`
+	Visibility             string         `json:"visibility" firestore:"visibility"`
+	DefaultBranch          string         `json:"defaultBranch" firestore:"defaultBranch"`
+	CreatedAt              time.Time      `json:"createdAt" firestore:"createdAt"`
+	UpdatedAt              time.Time      `json:"updatedAt" firestore:"updatedAt"`
+	Branches               []string       `json:"branches" firestore:"branches"`
+	AutoDeleteHeadBranches bool           `json:"autoDeleteHeadBranches" firestore:"autoDeleteHeadBranches"`
+	Collaborators          []Collaborator `json:"collaborators" firestore:"collaborators"`
 }
 
 // MapToRepositoryMetadata converts a Firestore document data map to RepositoryMetadata.
@@ -177,6 +186,28 @@ func MapToRepositoryMetadata(m map[string]interface{}) *RepositoryMetadata {
 		}
 	} else if val, ok := m["branches"].([]string); ok {
 		meta.Branches = val
+	}
+	if val, ok := m["collaborators"].([]interface{}); ok {
+		for _, c := range val {
+			cm, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			collab := Collaborator{}
+			if s, ok := cm["uid"].(string); ok {
+				collab.UID = s
+			}
+			if s, ok := cm["username"].(string); ok {
+				collab.Username = s
+			}
+			if t, ok := cm["addedAt"].(time.Time); ok {
+				collab.AddedAt = t
+			}
+			if s, ok := cm["addedBy"].(string); ok {
+				collab.AddedBy = s
+			}
+			meta.Collaborators = append(meta.Collaborators, collab)
+		}
 	}
 	return meta
 }

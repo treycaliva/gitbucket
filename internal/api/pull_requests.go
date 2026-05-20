@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
+	gitpkg "gitbucket/internal/git"
 )
 
 // branchExists checks if a branch exists in the bare repository.
@@ -41,6 +43,77 @@ func runGit(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %v failed: %w, stderr: %s", args, err, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// containsString reports whether s is present in xs.
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// loadCodeOwnersFromBareRepo reads a CODEOWNERS file from a bare repository at
+// the given ref by trying root, .gitbucket/, then docs/ in order. Returns an
+// empty (non-nil) *CodeOwners if no file exists at any of those paths.
+func loadCodeOwnersFromBareRepo(gitDir, ref string) (*gitpkg.CodeOwners, error) {
+	for _, rel := range []string{"CODEOWNERS", ".gitbucket/CODEOWNERS", "docs/CODEOWNERS"} {
+		cmd := exec.Command("git", "--git-dir", gitDir, "show", ref+":"+rel)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			// "does not exist" / "exists on disk, but not in" — try next location
+			continue
+		}
+		return gitpkg.ParseCodeOwners(&stdout)
+	}
+	return &gitpkg.CodeOwners{}, nil
+}
+
+// resolveCodeOwnersForPR computes the deduplicated set of usernames that should
+// be requested as reviewers for the given PR. It diffs target...source for
+// changed files, loads CODEOWNERS from the target branch, matches each file,
+// and excludes the PR author from the result. The returned slice is sorted.
+//
+// Best-effort: if anything fails (diff error, missing CODEOWNERS) the function
+// returns an empty slice and a nil error so the PR open path doesn't block.
+func resolveCodeOwnersForPR(gitDir, sourceBranch, targetBranch, authorUsername string) []string {
+	cmd := exec.Command("git", "--git-dir", gitDir, "diff", "--name-only", targetBranch+"..."+sourceBranch)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("codeowners: diff %s...%s failed: %v", targetBranch, sourceBranch, err)
+		return nil
+	}
+	files := strings.Split(strings.TrimSpace(string(out)), "\n")
+
+	co, err := loadCodeOwnersFromBareRepo(gitDir, targetBranch)
+	if err != nil {
+		log.Printf("codeowners: load on %s failed: %v", targetBranch, err)
+		return nil
+	}
+
+	owners := map[string]struct{}{}
+	for _, f := range files {
+		if f == "" {
+			continue
+		}
+		for _, o := range co.Match(f) {
+			u := strings.TrimPrefix(o, "@")
+			if u == "" || strings.EqualFold(u, authorUsername) {
+				continue
+			}
+			owners[u] = struct{}{}
+		}
+	}
+	reviewers := make([]string, 0, len(owners))
+	for u := range owners {
+		reviewers = append(reviewers, u)
+	}
+	sort.Strings(reviewers)
+	return reviewers
 }
 
 // CreatePullRequest handles POST /api/repos/{owner}/{repo}/pulls
@@ -92,6 +165,17 @@ func (h *APIHandler) CreatePullRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Auto-resolve CODEOWNERS for the diff and persist as requestedReviewers.
+	// Best-effort: failures here are logged and the PR is still returned successfully.
+	reviewers := resolveCodeOwnersForPR(localRepoPath, pr.SourceBranch, pr.TargetBranch, pr.AuthorUsername)
+	if reviewers == nil {
+		reviewers = []string{}
+	}
+	if err := db.UpdatePullRequestReviewers(r.Context(), h.FirestoreClient, owner, repo, pr.Number, reviewers); err != nil {
+		log.Printf("codeowners: set reviewers for PR %d: %v", pr.Number, err)
+	}
+	pr.RequestedReviewers = reviewers
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -364,6 +448,54 @@ func (h *APIHandler) MergePullRequest(w http.ResponseWriter, r *http.Request) {
 	if pr.Status != "open" {
 		http.Error(w, "Pull request is not open", http.StatusBadRequest)
 		return
+	}
+
+	// Branch-protection + CODEOWNERS enforcement on the target branch.
+	rules, ruleErr := db.ListRules(r.Context(), h.FirestoreClient, owner, repo)
+	if ruleErr != nil {
+		http.Error(w, "Failed to load branch protection rules: "+ruleErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if rule := gitpkg.MatchRule(rules, pr.TargetBranch); rule != nil {
+		// Merge allowlist: when non-empty, only listed UIDs may merge. Repo
+		// owner is allowed implicitly (they passed the isOwner check above).
+		if len(rule.MergeAllowlist) > 0 && !containsString(rule.MergeAllowlist, uid) {
+			http.Error(w, "merge not allowed for this user by branch protection rule", http.StatusForbidden)
+			return
+		}
+
+		if rule.RequireApprovals > 0 || rule.RequireCodeownerApproval {
+			reviews, err := db.ListReviews(r.Context(), h.FirestoreClient, owner, repo, pr.Number)
+			if err != nil {
+				http.Error(w, "Failed to load reviews: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			approvals := 0
+			approvalUsernames := map[string]bool{}
+			for _, rv := range reviews {
+				if rv.State == "approved" {
+					approvals++
+					approvalUsernames[rv.Username] = true
+				}
+			}
+			if approvals < rule.RequireApprovals {
+				http.Error(w, fmt.Sprintf("merge requires %d approvals (have %d)", rule.RequireApprovals, approvals), http.StatusForbidden)
+				return
+			}
+			if rule.RequireCodeownerApproval {
+				ok := false
+				for _, ru := range pr.RequestedReviewers {
+					if approvalUsernames[ru] {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					http.Error(w, "merge requires approval from a codeowner", http.StatusForbidden)
+					return
+				}
+			}
+		}
 	}
 
 	// 1. Acquire Lock
