@@ -85,6 +85,7 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   
   // Loaded Contents
   const [treeItems, setTreeItems] = useState([]);
+  const [codeowners, setCodeowners] = useState({}); // map: entry name → ["@alice", ...]
   const [fileContent, setFileContent] = useState('');
   const [commits, setCommits] = useState([]);
   const [readmeContent, setReadmeContent] = useState('');
@@ -271,7 +272,23 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
             // Load Directory Tree
             const items = await apiClient.get(`/api/repos/${owner}/${repo}/tree/${currentBranch}/${currentPath}`);
             setTreeItems(items);
-            
+
+            // Load CODEOWNERS map for the current directory (skip when empty).
+            if (items && items.length > 0) {
+              const params = new URLSearchParams({
+                path: currentPath || '',
+                ref: currentBranch,
+              });
+              try {
+                const co = await apiClient.get(`/api/repos/${owner}/${repo}/codeowners?${params.toString()}`);
+                setCodeowners((co && co.entries) || {});
+              } catch {
+                setCodeowners({});
+              }
+            } else {
+              setCodeowners({});
+            }
+
             // Look for README.md in the root directory
             const readmeFile = items.find(item => item.type === 'blob' && item.name.toLowerCase() === 'readme.md');
             if (readmeFile && !currentPath) {
@@ -673,20 +690,28 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                       <>
                         {/* Folders first */}
                         {treeItems.filter(item => item.type === 'tree').map(item => (
-                          <div 
-                            key={item.path} 
+                          <div
+                            key={item.path}
                             className="file-row"
                             onClick={() => handleDirectoryClick(item.path)}
                           >
                             <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
                             <span className="file-name" style={{ fontWeight: 500 }}>{item.name}</span>
+                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                              <span
+                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
+                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
+                              >
+                                {codeowners[item.name].join(' ')}
+                              </span>
+                            )}
                             <span className="file-size">-</span>
                           </div>
                         ))}
                         {/* Blobs second */}
                         {treeItems.filter(item => item.type === 'blob').map(item => (
-                          <div 
-                            key={item.path} 
+                          <div
+                            key={item.path}
                             className="file-row"
                             onClick={() => handleFileClick(item)}
                           >
@@ -694,6 +719,14 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                               {item.name.toLowerCase() === 'readme.md' ? <FileText size={18} style={{ color: '#a78bfa' }} /> : <FileCode size={18} style={{ color: '#94a3b8' }} />}
                             </span>
                             <span className="file-name">{item.name}</span>
+                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                              <span
+                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
+                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
+                              >
+                                {codeowners[item.name].join(' ')}
+                              </span>
+                            )}
                             <span className="file-size">{(item.size / 1024).toFixed(1)} KB</span>
                           </div>
                         ))}
