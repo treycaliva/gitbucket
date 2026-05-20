@@ -52,3 +52,18 @@
 - `GET /api/repos/:owner/:repo/tree/:branch/*` -> Response: list of tree items: `{"mode": "...", "type": "...", "sha": "...", "size": 0, "name": "...", "path": "..."}`
 - `GET /api/repos/:owner/:repo/blob/:branch/*` -> Response: raw binary file contents
 - `GET /api/config` -> Response: Firebase configuration details & DevMode flag
+
+## Storage Operations
+
+### GCS object versioning
+
+**Decision: not enabled.** Git objects (loose, pack, LFS blobs) are content-addressed
+by SHA — they are immutable. Versioning protects against overwrite/delete of mutable
+objects and provides no recovery benefit on content-addressed storage. The only
+mutable state that benefits from recovery — refs and metadata — lives in Firestore.
+
+### GCS soft-delete
+
+The repositories bucket has soft-delete enabled with 7-day retention to guard against
+accidental bulk-deletion or GC bugs. Enable on a new environment with
+`scripts/enable-soft-delete.sh` (requires `gcloud` auth and `GCS_BUCKET` env).
