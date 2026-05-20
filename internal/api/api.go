@@ -86,6 +86,8 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/pulls/{number}/diff", h.GetPullRequestDiff)
 
 			r.Get("/repos/{owner}/{repo}/collaborators", h.ListCollaboratorsHandler)
+
+			r.Get("/repos/{owner}/{repo}/branch-protection", h.ListBranchProtectionHandler)
 		})
 
 		// Authenticated group
@@ -110,6 +112,10 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 
 			r.Post("/repos/{owner}/{repo}/collaborators", h.AddCollaboratorHandler)
 			r.Delete("/repos/{owner}/{repo}/collaborators/{username}", h.RemoveCollaboratorHandler)
+
+			r.Post("/repos/{owner}/{repo}/branch-protection", h.CreateBranchProtectionHandler)
+			r.Put("/repos/{owner}/{repo}/branch-protection/{ruleId}", h.UpdateBranchProtectionHandler)
+			r.Delete("/repos/{owner}/{repo}/branch-protection/{ruleId}", h.DeleteBranchProtectionHandler)
 		})
 	})
 }
