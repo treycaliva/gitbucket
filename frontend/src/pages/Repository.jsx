@@ -105,6 +105,11 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
 
+  // Collaborators state
+  const [collaborators, setCollaborators] = useState([]);
+  const [newCollabUsername, setNewCollabUsername] = useState('');
+  const [collaboratorError, setCollaboratorError] = useState('');
+
   useEffect(() => {
     if (meta) {
       Promise.resolve().then(() => {
@@ -137,6 +142,37 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
 
   const cloneUrl = `${window.location.origin}/r/${owner}/${repo}.git`;
   const isOwner = user && user.username && user.username.toLowerCase() === owner.toLowerCase();
+
+  // Load collaborators when entering Settings tab as owner
+  useEffect(() => {
+    if (activeTab !== 'settings' || !isOwner) return;
+    apiClient.get(`/api/repos/${owner}/${repo}/collaborators`)
+      .then((data) => setCollaborators(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [owner, repo, activeTab, isOwner]);
+
+  const addCollaborator = async () => {
+    setCollaboratorError('');
+    try {
+      await apiClient.post(`/api/repos/${owner}/${repo}/collaborators`, {
+        username: newCollabUsername.trim(),
+      });
+      setNewCollabUsername('');
+      const list = await apiClient.get(`/api/repos/${owner}/${repo}/collaborators`);
+      setCollaborators(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setCollaboratorError(err.message || 'Failed to add');
+    }
+  };
+
+  const removeCollaborator = async (username) => {
+    try {
+      await apiClient.delete(`/api/repos/${owner}/${repo}/collaborators/${username}`);
+      setCollaborators((prev) => prev.filter((c) => c.username !== username));
+    } catch (err) {
+      setCollaboratorError(err.message || 'Failed to remove');
+    }
+  };
 
   // 1. Load Repository Metadata
   useEffect(() => {
@@ -676,6 +712,34 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           {/* Settings Tab (Owner Only) */}
           {activeTab === 'settings' && isOwner && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+              {/* Collaborators */}
+              <div className="glass-card">
+                <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Collaborators</h3>
+                <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                  Users with push and read access to this repository.
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <input
+                    className="text-input"
+                    placeholder="username"
+                    value={newCollabUsername}
+                    onChange={(e) => setNewCollabUsername(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn" onClick={addCollaborator} disabled={!newCollabUsername.trim()}>Add</button>
+                </div>
+                {collaboratorError && <div style={{ color: '#ef4444', marginBottom: '0.5rem' }}>{collaboratorError}</div>}
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {collaborators.map((c) => (
+                    <li key={c.uid} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                      <span>{c.username}</span>
+                      <button className="btn-ghost" onClick={() => removeCollaborator(c.username)}>Remove</button>
+                    </li>
+                  ))}
+                  {collaborators.length === 0 && <li style={{ color: '#64748b' }}>No collaborators yet.</li>}
+                </ul>
+              </div>
+
               {/* Repository Settings */}
               <div className="glass-card">
                 <h3 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', color: '#38bdf8' }}>Repository Settings</h3>
