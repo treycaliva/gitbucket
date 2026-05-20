@@ -69,3 +69,49 @@ func MatchRule(rules []Rule, branch string) *Rule {
 func wildcardCount(s string) int {
 	return strings.Count(s, "*") + strings.Count(s, "?") + strings.Count(s, "[")
 }
+
+// EnforcePush evaluates each ref update against the rule set and returns the rejections.
+// "branch" is derived from RefName by stripping refs/heads/. Refs outside refs/heads/
+// are not gated by branch rules in v1.
+func EnforcePush(rules []Rule, updates []RefUpdate, pusherUid string) EnforceResult {
+	out := EnforceResult{Reasons: map[string]string{}}
+	for _, u := range updates {
+		branch := strings.TrimPrefix(u.RefName, "refs/heads/")
+		if branch == u.RefName {
+			// not a branch (e.g. tag) — skip in v1
+			continue
+		}
+		rule := MatchRule(rules, branch)
+		if rule == nil {
+			continue
+		}
+
+		if u.IsDelete && rule.BlockDeletion {
+			out.Rejected = append(out.Rejected, u)
+			out.Reasons[u.RefName] = "branch deletion is blocked by protection rule"
+			continue
+		}
+		if u.IsForce && rule.BlockForcePush {
+			out.Rejected = append(out.Rejected, u)
+			out.Reasons[u.RefName] = "force-push is blocked by protection rule"
+			continue
+		}
+		if !inAllowlist(rule.PushAllowlist, pusherUid) {
+			out.Rejected = append(out.Rejected, u)
+			out.Reasons[u.RefName] = "direct push to this branch is not allowed"
+			continue
+		}
+	}
+	return out
+}
+
+// inAllowlist reports whether uid is in the explicit allowlist.
+// An empty list means nobody is allowed (use this to require PRs).
+func inAllowlist(list []string, uid string) bool {
+	for _, x := range list {
+		if x == uid {
+			return true
+		}
+	}
+	return false
+}
