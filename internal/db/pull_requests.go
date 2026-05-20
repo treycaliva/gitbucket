@@ -24,6 +24,9 @@ type PullRequest struct {
 	AuthorUID      string    `json:"authorUid" firestore:"authorUid"`
 	AuthorUsername string    `json:"authorUsername" firestore:"authorUsername"`
 	CreatedAt      time.Time `json:"createdAt" firestore:"createdAt"`
+	// RequestedReviewers is the set of usernames auto-resolved from CODEOWNERS
+	// on PR open. May be empty if no CODEOWNERS rules matched the diff.
+	RequestedReviewers []string `json:"requestedReviewers" firestore:"requestedReviewers"`
 }
 
 // CreatePullRequest transactionally creates a Pull Request and increments the repository's PR counter.
@@ -146,6 +149,23 @@ func ListPullRequests(ctx context.Context, client *firestore.Client, owner, repo
 		prs = []*PullRequest{}
 	}
 	return prs, nil
+}
+
+// UpdatePullRequestReviewers replaces the requestedReviewers field on a Pull Request.
+func UpdatePullRequestReviewers(ctx context.Context, client *firestore.Client, owner, repo string, number int, reviewers []string) error {
+	if client == nil {
+		return fmt.Errorf("firestore client is nil")
+	}
+	if reviewers == nil {
+		reviewers = []string{}
+	}
+	repoId := fmt.Sprintf("%s_%s", strings.ToLower(owner), strings.ToLower(repo))
+	prRef := client.Collection("repositories").Doc(repoId).Collection("pulls").Doc(strconv.Itoa(number))
+
+	_, err := prRef.Update(ctx, []firestore.Update{
+		{Path: "requestedReviewers", Value: reviewers},
+	})
+	return err
 }
 
 // UpdatePullRequestStatus updates the status (open, closed, merged) of a Pull Request.
