@@ -20,6 +20,53 @@ import {
   GitMerge
 } from 'lucide-react';
 
+function QuickstartCard({ cloneUrl, username }) {
+  return (
+    <div className="glass-card">
+      <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Repository Command Quickstart</h3>
+      <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
+        Configure your local command-line client to push and pull from this repository:
+      </p>
+      <pre style={{
+        background: 'rgba(0,0,0,0.4)',
+        border: '1px solid var(--border-color)',
+        padding: '1.25rem',
+        borderRadius: '6px',
+        fontFamily: 'var(--font-mono)',
+        fontSize: '0.85rem',
+        color: '#e2e8f0',
+        lineHeight: '1.6',
+        whiteSpace: 'pre'
+      }}>
+{`# 1. Initialize a new git directory locally
+git init
+git checkout -b main
+
+# 2. Add files and commit
+git add .
+git commit -m "initial commit"
+
+# 3. Link remote repository
+git remote add origin ${cloneUrl}
+
+# 4. Push to Cloud Run (use your Username and PAT when prompted)
+git push -u origin main`}
+      </pre>
+      <div style={{
+        marginTop: '1rem',
+        padding: '0.75rem 1rem',
+        background: 'rgba(245, 158, 11, 0.08)',
+        border: '1px solid rgba(245, 158, 11, 0.2)',
+        borderRadius: '6px',
+        color: '#f59e0b',
+        fontSize: '0.85rem'
+      }}>
+        <strong>Note:</strong> When git asks you for credentials on push, use your username (<strong>{username}</strong>) and your generated <strong>Personal Access Token (PAT)</strong> as the password. Standard Firebase account passwords will not work on the command line.
+      </div>
+    </div>
+  );
+}
+
 export default function Repository({ user, owner, repo, initialTab = 'code', initialPath = '', prNumber, onNavigate }) {
   const [meta, setMeta] = useState(null);
   const activeTab = initialTab;
@@ -572,6 +619,13 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                     )}
                   </div>
 
+                  {/* Quickstart for empty repo (owner only) */}
+                  {isOwner && commits.length === 0 && (
+                    <div style={{ marginTop: '1.5rem' }}>
+                      <QuickstartCard cloneUrl={cloneUrl} username={user.username} />
+                    </div>
+                  )}
+
                   {/* README Renderer */}
                   {readmeContent && (
                     <div className="readme-box">
@@ -622,50 +676,6 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           {/* Settings Tab (Owner Only) */}
           {activeTab === 'settings' && isOwner && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-              {/* Repository Setup Quickstart */}
-              <div className="glass-card">
-                <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Repository Command Quickstart</h3>
-                <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                  Configure your local command-line client to push and pull from this repository:
-                </p>
-                <pre style={{
-                  background: 'rgba(0,0,0,0.4)',
-                  border: '1px solid var(--border-color)',
-                  padding: '1.25rem',
-                  borderRadius: '6px',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.85rem',
-                  color: '#e2e8f0',
-                  lineHeight: '1.6',
-                  whiteSpace: 'pre'
-                }}>
-                  {`# 1. Initialize a new git directory locally
-git init
-git checkout -b main
-
-# 2. Add files and commit
-git add .
-git commit -m "initial commit"
-
-# 3. Link remote repository
-git remote add origin ${cloneUrl}
-
-# 4. Push to Cloud Run (use your Username and PAT when prompted)
-git push -u origin main`}
-                </pre>
-                <div style={{
-                  marginTop: '1rem',
-                  padding: '0.75rem 1rem',
-                  background: 'rgba(245, 158, 11, 0.08)',
-                  border: '1px solid rgba(245, 158, 11, 0.2)',
-                  borderRadius: '6px',
-                  color: '#f59e0b',
-                  fontSize: '0.85rem'
-                }}>
-                  <strong>Note:</strong> When git asks you for credentials on push, use your username (<strong>{user.username}</strong>) and your generated <strong>Personal Access Token (PAT)</strong> as the password. Standard Firebase account passwords will not work on the command line.
-                </div>
-              </div>
-
               {/* Repository Settings */}
               <div className="glass-card">
                 <h3 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', color: '#38bdf8' }}>Repository Settings</h3>
