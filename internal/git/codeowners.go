@@ -3,6 +3,7 @@ package git
 import (
 	"bufio"
 	"io"
+	"os"
 	"path"
 	"strings"
 
@@ -44,6 +45,23 @@ func ParseCodeOwners(r io.Reader) (*CodeOwners, error) {
 		co.Rules = append(co.Rules, CodeOwnersRule{Pattern: fields[0], Owners: fields[1:], LineNo: line})
 	}
 	return co, s.Err()
+}
+
+// LoadCodeOwners looks for a CODEOWNERS file in the materialized repo at
+// repoPath. Resolution order: <root>/CODEOWNERS, <root>/.gitbucket/CODEOWNERS,
+// <root>/docs/CODEOWNERS. The first existing file wins.
+//
+// If no CODEOWNERS file exists, returns an empty (non-nil) *CodeOwners with no
+// rules and no error so callers can call Match safely.
+func LoadCodeOwners(repoPath string) (*CodeOwners, error) {
+	for _, rel := range []string{"CODEOWNERS", ".gitbucket/CODEOWNERS", "docs/CODEOWNERS"} {
+		f, err := os.Open(repoPath + "/" + rel)
+		if err == nil {
+			defer f.Close()
+			return ParseCodeOwners(f)
+		}
+	}
+	return &CodeOwners{}, nil
 }
 
 // Match returns the owners for the given path. Last-matching rule wins.
