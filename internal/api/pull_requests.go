@@ -45,6 +45,16 @@ func runGit(dir string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// containsString reports whether s is present in xs.
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
 // loadCodeOwnersFromBareRepo reads a CODEOWNERS file from a bare repository at
 // the given ref by trying root, .gitbucket/, then docs/ in order. Returns an
 // empty (non-nil) *CodeOwners if no file exists at any of those paths.
@@ -438,6 +448,54 @@ func (h *APIHandler) MergePullRequest(w http.ResponseWriter, r *http.Request) {
 	if pr.Status != "open" {
 		http.Error(w, "Pull request is not open", http.StatusBadRequest)
 		return
+	}
+
+	// Branch-protection + CODEOWNERS enforcement on the target branch.
+	rules, ruleErr := db.ListRules(r.Context(), h.FirestoreClient, owner, repo)
+	if ruleErr != nil {
+		http.Error(w, "Failed to load branch protection rules: "+ruleErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if rule := gitpkg.MatchRule(rules, pr.TargetBranch); rule != nil {
+		// Merge allowlist: when non-empty, only listed UIDs may merge. Repo
+		// owner is allowed implicitly (they passed the isOwner check above).
+		if len(rule.MergeAllowlist) > 0 && !containsString(rule.MergeAllowlist, uid) {
+			http.Error(w, "merge not allowed for this user by branch protection rule", http.StatusForbidden)
+			return
+		}
+
+		if rule.RequireApprovals > 0 || rule.RequireCodeownerApproval {
+			reviews, err := db.ListReviews(r.Context(), h.FirestoreClient, owner, repo, pr.Number)
+			if err != nil {
+				http.Error(w, "Failed to load reviews: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			approvals := 0
+			approvalUsernames := map[string]bool{}
+			for _, rv := range reviews {
+				if rv.State == "approved" {
+					approvals++
+					approvalUsernames[rv.Username] = true
+				}
+			}
+			if approvals < rule.RequireApprovals {
+				http.Error(w, fmt.Sprintf("merge requires %d approvals (have %d)", rule.RequireApprovals, approvals), http.StatusForbidden)
+				return
+			}
+			if rule.RequireCodeownerApproval {
+				ok := false
+				for _, ru := range pr.RequestedReviewers {
+					if approvalUsernames[ru] {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					http.Error(w, "merge requires approval from a codeowner", http.StatusForbidden)
+					return
+				}
+			}
+		}
 	}
 
 	// 1. Acquire Lock
