@@ -21,6 +21,7 @@ import (
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
+	gitpkg "gitbucket/internal/git"
 )
 
 // getUpdatedAtMs extracts millisecond timestamp from repo metadata
@@ -211,6 +212,12 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Capture pre-push refs for branch-protection enforcement (only matters for writes).
+	var preRefs map[string]string
+	if isWrite {
+		preRefs = gitpkg.LocalRefs(localRepoPath)
+	}
+
 	// 4. CGI Execution of git-http-backend
 	backendPath, err := findGitHttpBackend()
 	if err != nil {
@@ -295,6 +302,31 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Post-push actions
 	if isWrite && waitErr == nil {
+		// 5a. Branch-protection enforcement.
+		// The CGI accepted the pack and updated the local refs; before we sync them
+		// to GCS/Firestore, evaluate each ref delta against the repo's rules.
+		postRefs := gitpkg.LocalRefs(localRepoPath)
+		updates := gitpkg.DiffRefs(localRepoPath, preRefs, postRefs)
+		if len(updates) > 0 {
+			rules, ruleErr := db.ListRules(r.Context(), h.FirestoreClient, owner, repo)
+			if ruleErr != nil {
+				log.Printf("[Git HTTP] Failed to load branch protection rules: %v (allowing push)", ruleErr)
+			} else {
+				res := gitpkg.EnforcePush(rules, updates, authenticatedUID)
+				if len(res.Rejected) > 0 {
+					// Cannot rewrite the HTTP status — the CGI already streamed its response.
+					// Block the GCS/Firestore sync so the rejected refs never become
+					// the source of truth; drop the local sync timestamp so the next
+					// request re-materializes the canonical state from storage.
+					for ref, why := range res.Reasons {
+						log.Printf("[Git HTTP] REJECTED ref=%s reason=%s", ref, why)
+					}
+					_ = os.Remove(filepath.Join(localRepoPath, "last_sync_timestamp"))
+					return
+				}
+			}
+		}
+
 		log.Printf("[Git HTTP] Write operation completed successfully. Archiving to GCS...")
 		if h.StorageClient != nil && h.BucketName != "" {
 			err = gcs.UploadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
