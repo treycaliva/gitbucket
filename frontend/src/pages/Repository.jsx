@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../apiClient';
-import { 
-  Folder, 
-  FileCode, 
-  GitBranch, 
-  Copy, 
-  Check, 
-  Layers, 
-  Clock, 
-  Settings as SettingsIcon, 
-  ArrowLeft, 
+import BranchProtectionModal from '../components/BranchProtectionModal';
+import {
+  Folder,
+  FileCode,
+  GitBranch,
+  Copy,
+  Check,
+  Layers,
+  Clock,
+  Settings as SettingsIcon,
+  ArrowLeft,
   FileText,
   Trash2,
   Lock,
@@ -110,6 +111,12 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [newCollabUsername, setNewCollabUsername] = useState('');
   const [collaboratorError, setCollaboratorError] = useState('');
 
+  // Branch protection state
+  const [protectionRules, setProtectionRules] = useState([]);
+  const [protectionError, setProtectionError] = useState('');
+  const [showProtectionModal, setShowProtectionModal] = useState(false);
+  const [editingRule, setEditingRule] = useState(null); // null => create mode
+
   useEffect(() => {
     if (meta) {
       Promise.resolve().then(() => {
@@ -171,6 +178,45 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
       setCollaborators((prev) => prev.filter((c) => c.username !== username));
     } catch (err) {
       setCollaboratorError(err.message || 'Failed to remove');
+    }
+  };
+
+  // Load branch protection rules when entering Settings as owner
+  useEffect(() => {
+    if (activeTab !== 'settings' || !isOwner) return;
+    apiClient.get(`/api/repos/${owner}/${repo}/branch-protection`)
+      .then((data) => setProtectionRules(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [owner, repo, activeTab, isOwner]);
+
+  const refetchProtectionRules = async () => {
+    try {
+      const list = await apiClient.get(`/api/repos/${owner}/${repo}/branch-protection`);
+      setProtectionRules(Array.isArray(list) ? list : []);
+    } catch {
+      // leave existing list; surface error elsewhere
+    }
+  };
+
+  const handleProtectionSubmit = async (rule) => {
+    setProtectionError('');
+    if (rule.id) {
+      await apiClient.put(`/api/repos/${owner}/${repo}/branch-protection/${rule.id}`, rule);
+    } else {
+      await apiClient.post(`/api/repos/${owner}/${repo}/branch-protection`, rule);
+    }
+    await refetchProtectionRules();
+    setShowProtectionModal(false);
+    setEditingRule(null);
+  };
+
+  const handleProtectionDelete = async (ruleId) => {
+    setProtectionError('');
+    try {
+      await apiClient.delete(`/api/repos/${owner}/${repo}/branch-protection/${ruleId}`);
+      await refetchProtectionRules();
+    } catch (err) {
+      setProtectionError(err.message || 'Failed to delete rule.');
     }
   };
 
@@ -740,6 +786,101 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 </ul>
               </div>
 
+              {/* Branch protection */}
+              <div className="glass-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.25rem', margin: 0, color: '#38bdf8' }}>Branch protection</h3>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => { setEditingRule(null); setShowProtectionModal(true); }}
+                    style={{ padding: '0.4rem 0.9rem', fontSize: '0.85rem' }}
+                  >
+                    Add rule
+                  </button>
+                </div>
+                <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                  Restrict who can push or merge to matching branches, require pull requests, and block destructive operations.
+                </p>
+                {protectionError && (
+                  <div style={{ color: '#ef4444', marginBottom: '0.75rem', fontSize: '0.85rem' }}>{protectionError}</div>
+                )}
+                {protectionRules.length === 0 ? (
+                  <div style={{ color: '#64748b', fontSize: '0.9rem', padding: '0.5rem 0' }}>
+                    No branch protection rules. Click "Add rule" to create one.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                      <thead>
+                        <tr style={{ textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid var(--border-color)' }}>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Pattern</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Push</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Merge</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600 }}>Toggles</th>
+                          <th style={{ padding: '0.5rem 0.5rem', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {protectionRules.map((r) => {
+                          const badges = [];
+                          if (r.requirePullRequest) badges.push('PR required');
+                          if (r.requireApprovals && r.requireApprovals > 0) badges.push(`${r.requireApprovals} approval${r.requireApprovals === 1 ? '' : 's'}`);
+                          if (r.requireCodeownerApproval) badges.push('Code-owner');
+                          if (r.blockForcePush) badges.push('No force push');
+                          if (r.blockDeletion) badges.push('No delete');
+                          return (
+                            <tr key={r.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '0.6rem 0.5rem', fontFamily: 'var(--font-mono)', color: '#e2e8f0' }}>{r.pattern}</td>
+                              <td style={{ padding: '0.6rem 0.5rem', color: '#cbd5e1' }}>
+                                {Array.isArray(r.pushAllowlist) ? r.pushAllowlist.length : 0}
+                              </td>
+                              <td style={{ padding: '0.6rem 0.5rem', color: '#cbd5e1' }}>
+                                {Array.isArray(r.mergeAllowlist) ? r.mergeAllowlist.length : 0}
+                              </td>
+                              <td style={{ padding: '0.6rem 0.5rem' }}>
+                                {badges.length === 0 ? (
+                                  <span style={{ color: '#64748b', fontSize: '0.8rem' }}>—</span>
+                                ) : (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                    {badges.map((b) => (
+                                      <span key={b} style={{
+                                        background: 'rgba(56, 189, 248, 0.12)',
+                                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                                        color: '#38bdf8',
+                                        padding: '0.1rem 0.5rem',
+                                        borderRadius: '999px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 500,
+                                      }}>{b}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => { setEditingRule(r); setShowProtectionModal(true); }}
+                                  style={{ marginRight: '0.5rem' }}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => { if (window.confirm(`Delete rule for "${r.pattern}"?`)) handleProtectionDelete(r.id); }}
+                                  style={{ color: '#ef4444' }}
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
               {/* Repository Settings */}
               <div className="glass-card">
                 <h3 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', color: '#38bdf8' }}>Repository Settings</h3>
@@ -869,6 +1010,19 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
             <PullRequestDetail owner={owner} repo={repo} prNumber={prNumber} meta={meta} onNavigate={onNavigate} user={user} />
           )}
         </>
+      )}
+
+      {/* Branch Protection Modal */}
+      {showProtectionModal && (
+        <BranchProtectionModal
+          key={editingRule ? `edit-${editingRule.id}` : 'create'}
+          mode={editingRule ? 'edit' : 'create'}
+          initialRule={editingRule}
+          owner={owner}
+          collaborators={collaborators}
+          onClose={() => { setShowProtectionModal(false); setEditingRule(null); }}
+          onSubmit={handleProtectionSubmit}
+        />
       )}
     </div>
   );
