@@ -381,7 +381,18 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
     
     // Bold
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    
+
+    // Italic: *text* and _text_ (underscore form ignores snake_case)
+    html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    html = html.replace(/(^|[^A-Za-z0-9])_([^_\n]+)_(?![A-Za-z0-9])/g, '$1<em>$2</em>');
+
+    // Links: [text](url) — restrict to safe schemes; leave others as raw text
+    html = html.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, text, url) => {
+      if (!/^(https?:\/\/|mailto:|\/|#)/i.test(url)) return match;
+      const href = url.replace(/"/g, '&quot;');
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: none;">${text}</a>`;
+    });
+
     // Unordered lists
     html = html.replace(/^\* (.*?)$/gm, '<li style="margin-left: 1.5rem; margin-bottom: 0.35rem; color: var(--text-secondary);">$1</li>');
     html = html.replace(/^- (.*?)$/gm, '<li style="margin-left: 1.5rem; margin-bottom: 0.35rem; color: var(--text-secondary);">$1</li>');
@@ -1672,9 +1683,17 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                 <span style={{ fontWeight: 600, color: '#f8fafc' }}>@{pr.authorUsername}</span>
                 <span style={{ color: '#64748b', fontSize: '0.85rem' }}>commented on {new Date(pr.createdAt).toLocaleDateString()}</span>
               </div>
-              <p style={{ color: '#e2e8f0', margin: 0, lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
-                {pr.description || 'No description provided.'}
-              </p>
+              {pr.description ? (
+                <div
+                  className="markdown-body"
+                  style={{ color: '#e2e8f0', lineHeight: '1.5' }}
+                  dangerouslySetInnerHTML={{ __html: renderReadme(pr.description) }}
+                />
+              ) : (
+                <p style={{ color: '#e2e8f0', margin: 0, lineHeight: '1.5' }}>
+                  No description provided.
+                </p>
+              )}
             </div>
 
             {/* Conversation timeline */}
@@ -1716,14 +1735,15 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                         <span style={{ fontWeight: 600, color: comment.author === 'currentUser' ? '#38bdf8' : '#f8fafc' }}>@{comment.author === 'currentUser' ? 'you' : comment.author}</span>
                         <span>{new Date(comment.date).toLocaleString()}</span>
                       </div>
-                      <div className="timeline-content-body" style={{
-                        color: '#e2e8f0',
-                        fontSize: '0.9rem',
-                        lineHeight: '1.4',
-                        whiteSpace: 'pre-wrap'
-                      }}>
-                        {comment.body}
-                      </div>
+                      <div
+                        className="timeline-content-body markdown-body"
+                        style={{
+                          color: '#e2e8f0',
+                          fontSize: '0.9rem',
+                          lineHeight: '1.4'
+                        }}
+                        dangerouslySetInnerHTML={{ __html: renderReadme(comment.body) }}
+                      />
                     </div>
                   </div>
                 ))}
