@@ -53,6 +53,78 @@
 - `GET /api/repos/:owner/:repo/blob/:branch/*` -> Response: raw binary file contents
 - `GET /api/config` -> Response: Firebase configuration details & DevMode flag
 
+#### Collaborators
+- `GET /api/repos/:owner/:repo/collaborators` (OptionalWebAuth; requires read access)
+  -> Response: `[{"uid": "...", "username": "...", "addedAt": "...", "addedBy": "..."}]` (empty array if none).
+  Status codes: 200, 403 (no read access), 404 (repo not found), 500.
+  Lists non-owner users with explicit access to the repo. The owner is implicit and not included.
+- `POST /api/repos/:owner/:repo/collaborators` (RequireWebAuth; owner only)
+  -> Request: `{"username": "name"}` (must match `^[a-zA-Z0-9-]{3,20}$`)
+  -> Response: 204 No Content (empty body).
+  Status codes: 204, 400 (bad/missing username, or target is the owner), 401, 403 (not owner), 404 (repo or user not found), 500.
+- `DELETE /api/repos/:owner/:repo/collaborators/:username` (RequireWebAuth; owner only)
+  -> Response: 204 No Content (no-op if username is not present).
+  Status codes: 204, 401, 403 (not owner), 404 (repo not found), 500.
+
+#### Branch Protection
+Rule object shape (used in list/create/update responses and create/update requests):
+```
+{
+  "id": "...",                          // assigned on create; required in PUT path
+  "pattern": "main|release/*|...",      // filepath.Match semantics, 1–200 chars
+  "pushAllowlist": ["uid1", ...],       // UIDs allowed to push directly; empty = nobody (PR-only)
+  "mergeAllowlist": ["uid1", ...],      // UIDs allowed to merge PRs into matched branches
+  "requirePullRequest": true,
+  "requireApprovals": 0,
+  "requireCodeownerApproval": false,
+  "blockForcePush": true,
+  "blockDeletion": true
+}
+```
+- `GET /api/repos/:owner/:repo/branch-protection` (OptionalWebAuth; requires read access)
+  -> Response: array of Rule objects (empty array if none).
+  Status codes: 200, 403, 404, 500.
+- `POST /api/repos/:owner/:repo/branch-protection` (RequireWebAuth; owner only)
+  -> Request: Rule object (id is ignored / assigned server-side)
+  -> Response: 201 Created with the persisted Rule including assigned `id`.
+  Status codes: 201, 400 (invalid pattern: empty, >200 chars, or malformed glob), 401, 403, 404, 500.
+- `PUT /api/repos/:owner/:repo/branch-protection/:ruleId` (RequireWebAuth; owner only)
+  -> Request: full Rule object (full replace)
+  -> Response: 204 No Content.
+  Status codes: 204, 400 (invalid pattern), 401, 403, 404 (repo or rule not found), 500.
+- `DELETE /api/repos/:owner/:repo/branch-protection/:ruleId` (RequireWebAuth; owner only)
+  -> Response: 204 No Content.
+  Status codes: 204, 401, 403, 404, 500.
+
+#### CODEOWNERS
+- `GET /api/repos/:owner/:repo/codeowners?path=:dir&ref=:ref` (OptionalWebAuth; same read semantics as `tree`/`blob`)
+  -> Response: `{"entries": {"<childName>": ["@owner1", "@team/x", ...], ...}}`.
+  Keys are immediate children of `path` (default: repo root) at `ref` (default: repo `defaultBranch`, falling back to `main`). Entries with no matching CODEOWNERS rule are omitted; the map may be empty.
+  Status codes: 200 (also returned with empty `entries` for empty repo / unknown ref / missing dir / parse errors), 403, 404, 500 (other git errors).
+  Resolves CODEOWNERS from `CODEOWNERS`, `.gitbucket/CODEOWNERS`, or `docs/CODEOWNERS` at the requested ref.
+
+#### Pull Request Reviews
+- `POST /api/repos/:owner/:repo/pulls/:number/reviews` (RequireWebAuth; requires read access; PR author may not review their own PR)
+  -> Request: `{"state": "approved|changes_requested|commented", "body": "..."}`
+  -> Response: 204 No Content. Re-submission by the same user replaces the prior review (one review per (PR, user)).
+  Status codes: 204, 400 (bad number, bad body, or invalid state), 401, 403 (no read access, or self-review), 404 (repo or PR not found), 500.
+- `GET /api/repos/:owner/:repo/pulls/:number/reviews` (OptionalWebAuth; requires read access)
+  -> Response: `[{"uid": "...", "username": "...", "state": "approved|changes_requested|commented", "body": "...", "submittedAt": "..."}]`.
+  Status codes: 200, 403, 404, 500.
+
+#### Pull Request Response Shape Change
+The `PullRequest` object returned by the `pulls` endpoints (`GET /api/repos/:owner/:repo/pulls`, `GET .../pulls/:number`, etc.) now includes:
+- `requestedReviewers: string[]` — usernames auto-resolved from CODEOWNERS at PR open time against the PR's diff. May be empty if no CODEOWNERS rules matched. Computed once at creation; not recomputed when the PR is updated.
+
+### Git Smart HTTP — Branch-Protection Enforcement at Push Time
+Push-time enforcement runs against `git-receive-pack` results **after** the CGI has already streamed its response, so a rejected push **does not return HTTP 403**. The HTTP response indicates the CGI accepted the pack; rejection is enforced by:
+
+1. Diffing local refs (pre vs. post CGI execution) to derive the proposed `RefUpdate` set.
+2. Running `git.EnforcePush(rules, updates, pusherUid)` against the rules stored in Firestore.
+3. If any updates are rejected: **skipping GCS upload and Firestore ref sync-back**, and deleting the local `last_sync_timestamp` file.
+
+Effect: from the client's perspective the push appears to succeed at the HTTP layer, but the rejected refs never become canonical. The next request that materializes the repo will pull the unchanged refs from GCS/Firestore, so to any other clone the push is invisible. Rejection reasons are logged server-side (`[Git HTTP] REJECTED ref=... reason=...`).
+
 ## Storage Operations
 
 ### GCS object versioning
