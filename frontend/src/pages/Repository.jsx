@@ -1382,7 +1382,14 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
   const [repoBranches, setRepoBranches] = useState([]);
   const [deletingBranch, setDeletingBranch] = useState(false);
 
+  // Reviews
+  const [reviews, setReviews] = useState([]);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState('');
+  const [reviewBody, setReviewBody] = useState('');
+
   const isOwner = user && user.username && user.username.toLowerCase() === owner.toLowerCase();
+  const isPrAuthor = user && user.username && pr && pr.authorUsername && user.username.toLowerCase() === pr.authorUsername.toLowerCase();
 
   useEffect(() => {
     if (meta) {
@@ -1413,15 +1420,17 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
       setLoading(true);
       setError('');
       try {
-        const [prData, commitsData, diffData] = await Promise.all([
+        const [prData, commitsData, diffData, reviewsData] = await Promise.all([
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}`),
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/commits`).catch(() => []),
-          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' }))
+          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' })),
+          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`).catch(() => [])
         ]);
 
         setPr(prData);
         setCommits(commitsData || []);
         setDiff(diffData?.rawDiff || '');
+        setReviews(Array.isArray(reviewsData) ? reviewsData : []);
 
         const saved = localStorage.getItem(`pr_comments_${owner}_${repo}_${prNumber}`);
         if (saved) {
@@ -1438,6 +1447,32 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 
     loadPrDetails();
   }, [owner, repo, prNumber]);
+
+  const refetchReviews = async () => {
+    try {
+      const list = await apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`);
+      setReviews(Array.isArray(list) ? list : []);
+    } catch {
+      // Keep prior list on transient failure; surface error via reviewError separately.
+    }
+  };
+
+  const handleSubmitReview = async (state) => {
+    setReviewError('');
+    setReviewSubmitting(state);
+    try {
+      await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`, {
+        state,
+        body: reviewBody,
+      });
+      setReviewBody('');
+      await refetchReviews();
+    } catch (err) {
+      setReviewError(err.message || 'Failed to submit review.');
+    } finally {
+      setReviewSubmitting('');
+    }
+  };
 
   const handleAddComment = (e) => {
     e.preventDefault();
@@ -1858,6 +1893,122 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 
           {/* Right Column: Metadata / info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Reviewers */}
+            <div className="glass-card" style={{ padding: '1.25rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Reviewers</h3>
+              {(() => {
+                // Build a single ordered list:
+                //   1) requestedReviewers (in their declared order)
+                //   2) any users who have submitted a review but are NOT in #1
+                // For each, look up the latest review (if any) to render their state.
+                const requested = Array.isArray(pr.requestedReviewers) ? pr.requestedReviewers : [];
+                const byUsername = new Map();
+                for (const rv of reviews) {
+                  // ListReviews orders ascending by submittedAt, so later entries win.
+                  byUsername.set(rv.username.toLowerCase(), rv);
+                }
+                const requestedLower = new Set(requested.map(u => u.toLowerCase()));
+                const adhoc = [];
+                for (const rv of reviews) {
+                  if (!requestedLower.has(rv.username.toLowerCase())) {
+                    adhoc.push(rv.username);
+                  }
+                }
+                // De-dupe adhoc (multiple reviews per user collapse).
+                const seen = new Set();
+                const adhocUnique = adhoc.filter(u => {
+                  const k = u.toLowerCase();
+                  if (seen.has(k)) return false;
+                  seen.add(k);
+                  return true;
+                });
+                const all = [...requested, ...adhocUnique];
+
+                if (all.length === 0) {
+                  return (
+                    <div style={{ color: '#64748b', fontSize: '0.85rem' }}>
+                      No reviewers requested.
+                    </div>
+                  );
+                }
+
+                const stateLabel = (s) => {
+                  if (s === 'approved') return { text: '✓ approved', color: '#10b981' };
+                  if (s === 'changes_requested') return { text: '✕ changes requested', color: '#f43f5e' };
+                  if (s === 'commented') return { text: 'commented', color: '#94a3b8' };
+                  return { text: '– pending', color: '#64748b' };
+                };
+
+                return (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {all.map(username => {
+                      const rv = byUsername.get(username.toLowerCase());
+                      const s = stateLabel(rv && rv.state);
+                      return (
+                        <li
+                          key={username}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '0.9rem',
+                          }}
+                        >
+                          <span style={{ color: '#e2e8f0' }}>@{username}</span>
+                          <span style={{ color: s.color, fontSize: '0.85rem', fontWeight: 500 }}>{s.text}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                );
+              })()}
+
+              {/* Reviewer action buttons (visible to signed-in non-author on open PRs) */}
+              {user && pr.status === 'open' && !isPrAuthor && (
+                <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                  <textarea
+                    className="text-input"
+                    placeholder="Leave a note with your review (optional)"
+                    value={reviewBody}
+                    onChange={(e) => setReviewBody(e.target.value)}
+                    style={{ width: '100%', minHeight: '60px', marginBottom: '0.75rem', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.85rem' }}
+                  />
+                  {reviewError && (
+                    <div style={{ color: '#ef4444', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{reviewError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => handleSubmitReview('approved')}
+                      disabled={!!reviewSubmitting}
+                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                    >
+                      {reviewSubmitting === 'approved' ? 'Approving…' : 'Approve'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => handleSubmitReview('changes_requested')}
+                      disabled={!!reviewSubmitting}
+                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                    >
+                      {reviewSubmitting === 'changes_requested' ? 'Submitting…' : 'Request changes'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => handleSubmitReview('commented')}
+                      disabled={!!reviewSubmitting}
+                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                    >
+                      {reviewSubmitting === 'commented' ? 'Submitting…' : 'Comment'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="glass-card" style={{ padding: '1.25rem' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Review Status</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem' }}>
