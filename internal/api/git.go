@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
 )
@@ -139,35 +140,31 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Authentication and Authorization Check
 	var authenticatedUser string
-	var isOwner bool
+	var authenticatedUID string
 
 	username, pat, ok := r.BasicAuth()
 	if ok {
-		_, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
+		verifiedUID, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
 		if err == nil {
-			if strings.ToLower(verifiedUsername) == strings.ToLower(username) {
+			if strings.EqualFold(verifiedUsername, username) {
 				authenticatedUser = verifiedUsername
-				if strings.ToLower(verifiedUsername) == strings.ToLower(owner) {
-					isOwner = true
-				}
+				authenticatedUID = verifiedUID
 			}
 		}
 	}
 
+	meta := db.MapToRepositoryMetadata(repoMeta)
 	if isWrite {
-		if !isOwner {
+		if !auth.CanPush(meta, authenticatedUID) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
-			http.Error(w, "Unauthorized. Pushing requires ownership.", http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: push access required.", http.StatusUnauthorized)
 			return
 		}
 	} else {
-		visibility, _ := repoMeta["visibility"].(string)
-		if visibility == "private" {
-			if !isOwner {
-				w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
-				http.Error(w, "Unauthorized. Private repository.", http.StatusUnauthorized)
-				return
-			}
+		if !auth.CanRead(meta, authenticatedUID) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
+			http.Error(w, "Unauthorized: read access required.", http.StatusUnauthorized)
+			return
 		}
 	}
 
@@ -390,37 +387,33 @@ func (h *APIHandler) HandleLFSBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var isOwner bool
+	var authenticatedUID string
 	username, pat, ok := r.BasicAuth()
 	if ok {
-		_, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
+		verifiedUID, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
 		if err == nil {
 			if strings.EqualFold(verifiedUsername, username) {
-				if strings.EqualFold(verifiedUsername, owner) {
-					isOwner = true
-				}
+				authenticatedUID = verifiedUID
 			}
 		}
 	}
 
+	meta := db.MapToRepositoryMetadata(repoMeta)
 	if isUpload {
-		if !isOwner {
+		if !auth.CanPush(meta, authenticatedUID) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
 			w.Header().Set("Content-Type", "application/vnd.git-lfs+json")
 			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"message": "Unauthorized. Pushing LFS requires ownership."})
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "Unauthorized: push access required."})
 			return
 		}
 	} else { // download
-		visibility, _ := repoMeta["visibility"].(string)
-		if visibility == "private" {
-			if !isOwner {
-				w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
-				w.Header().Set("Content-Type", "application/vnd.git-lfs+json")
-				w.WriteHeader(http.StatusUnauthorized)
-				_ = json.NewEncoder(w).Encode(map[string]string{"message": "Unauthorized. Private repository access requires ownership."})
-				return
-			}
+		if !auth.CanRead(meta, authenticatedUID) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
+			w.Header().Set("Content-Type", "application/vnd.git-lfs+json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "Unauthorized: read access required."})
+			return
 		}
 	}
 
@@ -509,22 +502,21 @@ func (h *APIHandler) HandleLFSUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var isOwner bool
+	var authenticatedUID string
 	username, pat, ok := r.BasicAuth()
 	if ok {
-		_, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
+		verifiedUID, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
 		if err == nil {
 			if strings.EqualFold(verifiedUsername, username) {
-				if strings.EqualFold(verifiedUsername, owner) {
-					isOwner = true
-				}
+				authenticatedUID = verifiedUID
 			}
 		}
 	}
 
-	if !isOwner {
+	meta := db.MapToRepositoryMetadata(repoMeta)
+	if !auth.CanPush(meta, authenticatedUID) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
-		http.Error(w, "Unauthorized. Upload requires ownership.", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized: push access required.", http.StatusUnauthorized)
 		return
 	}
 
@@ -579,26 +571,22 @@ func (h *APIHandler) HandleLFSDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var isOwner bool
+	var authenticatedUID string
 	username, pat, ok := r.BasicAuth()
 	if ok {
-		_, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
+		verifiedUID, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
 		if err == nil {
 			if strings.EqualFold(verifiedUsername, username) {
-				if strings.EqualFold(verifiedUsername, owner) {
-					isOwner = true
-				}
+				authenticatedUID = verifiedUID
 			}
 		}
 	}
 
-	visibility, _ := repoMeta["visibility"].(string)
-	if visibility == "private" {
-		if !isOwner {
-			w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
-			http.Error(w, "Unauthorized. Private repository access requires ownership.", http.StatusUnauthorized)
-			return
-		}
+	meta := db.MapToRepositoryMetadata(repoMeta)
+	if !auth.CanRead(meta, authenticatedUID) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
+		http.Error(w, "Unauthorized: read access required.", http.StatusUnauthorized)
+		return
 	}
 
 	// 2. Stream object from GCS to client
