@@ -84,6 +84,7 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPullRequest)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}/commits", h.GetPullRequestCommits)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}/diff", h.GetPullRequestDiff)
+			r.Get("/repos/{owner}/{repo}/pulls/{number}/reviews", h.ListReviewsHandler)
 
 			r.Get("/repos/{owner}/{repo}/collaborators", h.ListCollaboratorsHandler)
 
@@ -109,6 +110,7 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Post("/repos/{owner}/{repo}/pulls", h.CreatePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/merge", h.MergePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/close", h.ClosePullRequest)
+			r.Post("/repos/{owner}/{repo}/pulls/{number}/reviews", h.SubmitReviewHandler)
 
 			r.Post("/repos/{owner}/{repo}/collaborators", h.AddCollaboratorHandler)
 			r.Delete("/repos/{owner}/{repo}/collaborators/{username}", h.RemoveCollaboratorHandler)
