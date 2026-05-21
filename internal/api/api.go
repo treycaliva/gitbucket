@@ -804,7 +804,19 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cmd := exec.Command("git", "--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit), `--format=%H|%an|%ae|%ad|%s`, branch)
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	args := []string{"--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit)}
+	if offset > 0 {
+		args = append(args, "--skip", strconv.Itoa(offset))
+	}
+	args = append(args, `--format=%H|%an|%ae|%ad|%s`, branch)
+	cmd := exec.Command("git", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
