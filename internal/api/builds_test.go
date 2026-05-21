@@ -164,4 +164,21 @@ func TestBuildsAPI(t *testing.T) {
 	if !strings.Contains(signedUrl, "mock-signed-url") {
 		t.Errorf("expected mock signed URL, got %q", signedUrl)
 	}
+
+	// 6. Test DecorateCommitsWithStatuses helper directly
+	commitsToDecorate := []CommitInfo{
+		{
+			SHA: sha,
+		},
+	}
+	apiHandler.DecorateCommitsWithStatuses(ctx, owner, repo, commitsToDecorate)
+	if commitsToDecorate[0].Status != "QUEUED" {
+		t.Errorf("expected status 'QUEUED', got %s", commitsToDecorate[0].Status)
+	}
+	if commitsToDecorate[0].OverallStatus != "QUEUED" {
+		t.Errorf("expected overallStatus 'QUEUED', got %s", commitsToDecorate[0].OverallStatus)
+	}
+	if len(commitsToDecorate[0].Statuses) != 1 || commitsToDecorate[0].Statuses[0].BuildID != buildID || commitsToDecorate[0].Statuses[0].Status != "QUEUED" {
+		t.Errorf("expected one status entry with buildId '%s', got %+v", buildID, commitsToDecorate[0].Statuses)
+	}
 }

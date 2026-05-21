@@ -346,6 +346,8 @@ func (h *APIHandler) GetPullRequestCommits(w http.ResponseWriter, r *http.Reques
 	}
 	if commits == nil {
 		commits = []CommitInfo{}
+	} else if len(commits) > 0 {
+		h.DecorateCommitsWithStatuses(r.Context(), owner, repo, commits)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

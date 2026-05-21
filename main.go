@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/firestore"
+	kms "cloud.google.com/go/kms/apiv1"
+	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/storage"
 	firebase "firebase.google.com/go/v4"
 	fauth "firebase.google.com/go/v4/auth"
@@ -18,9 +21,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"google.golang.org/api/option"
 
-	kms "cloud.google.com/go/kms/apiv1"
-
 	"gitbucket/internal/api"
+	"gitbucket/internal/apps"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/config"
 	"gitbucket/internal/db"
@@ -190,6 +192,21 @@ func main() {
 	}
 	syncKMSClient := sync.NewKMSClient(kmsKeyMgmtClient, cfg.KMSKeyName)
 
+	// SecretStore for the GitHub App emulation subsystem (private keys, webhook secrets).
+	var appsSecretStore apps.SecretStore
+	if cfg.DevMode {
+		appsSecretStore = apps.NewMemorySecretStore()
+		log.Println("apps: using in-memory SecretStore (DEV_MODE)")
+	} else {
+		smClient, err := secretmanager.NewClient(ctx)
+		if err != nil {
+			log.Fatalf("failed to initialize Secret Manager client: %v", err)
+		}
+		defer smClient.Close()
+		appsSecretStore = apps.NewRealSecretStore(smClient, cfg.SecretManagerProject)
+		log.Printf("apps: Secret Manager client initialized for project %s", cfg.SecretManagerProject)
+	}
+
 	// Initialize Auth Handler
 	authHandler := auth.NewAuthHandler(cfg.DevMode, authClient, firestoreClient)
 
@@ -203,6 +220,11 @@ func main() {
 	// API Routes
 	apiHandler := api.NewAPIHandler(firestoreClient, storageClient, cfg.GCSBucket, cfg.LocalReposRoot, authHandler, syncKMSClient)
 	apiHandler.RegisterRoutes(r)
+
+	// GitHub App emulation routes (Plan 1: JWT-authed App endpoints only).
+	appsJWTVerifier := apps.NewJWTVerifier(firestoreClient, 60*time.Second)
+	appsHandler := apps.NewHandler(firestoreClient, appsSecretStore, appsJWTVerifier)
+	apps.RegisterRoutes(r, appsHandler)
 
 	// Static Assets & SPA Fallback
 	staticDir := "frontend/dist"
