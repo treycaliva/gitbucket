@@ -6,6 +6,7 @@ package v3fmt
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -40,7 +41,8 @@ func (b *URLBuilder) PullAPI(owner, repo string, number int) string {
 }
 
 func (b *URLBuilder) ContentsAPI(owner, repo, path, ref string) string {
-	return fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", b.APIRoot(), owner, repo, path, ref)
+	return fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s",
+		b.APIRoot(), owner, repo, path, url.QueryEscape(ref))
 }
 
 func (b *URLBuilder) GitRefAPI(owner, repo, ref string) string {
