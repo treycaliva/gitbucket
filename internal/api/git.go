@@ -674,6 +674,122 @@ func (h *APIHandler) HandleLFSUpload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// TagInfo is a single tag with its target commit SHA.
+type TagInfo struct {
+	Name string `json:"name"`
+	SHA  string `json:"sha"`
+}
+
+// ListTags handles GET /api/repos/{owner}/{repo}/tags
+func (h *APIHandler) ListTags(w http.ResponseWriter, r *http.Request) {
+	owner := chi.URLParam(r, "owner")
+	repo := chi.URLParam(r, "repo")
+
+	_, localRepoPath, ok := h.authorizeGitRead(&w, r, owner, repo)
+	if !ok {
+		return
+	}
+
+	cmd := exec.Command("git", "--git-dir", localRepoPath, "for-each-ref",
+		"--sort=-creatordate",
+		"--format=%(refname:short)|%(objectname)",
+		"refs/tags")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errStr := stderr.String()
+		if strings.Contains(errStr, "does not have any commits") || strings.Contains(errStr, "fatal: bad default revision") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		http.Error(w, "Git error: "+errStr, http.StatusInternalServerError)
+		return
+	}
+
+	tags := []TagInfo{}
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		tags = append(tags, TagInfo{Name: parts[0], SHA: parts[1]})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(tags)
+}
+
+// BranchHeadInfo is the head commit on a branch plus total commit count.
+type BranchHeadInfo struct {
+	SHA          string `json:"sha"`
+	AuthorName   string `json:"authorName"`
+	AuthorEmail  string `json:"authorEmail"`
+	Date         string `json:"date"`
+	Message      string `json:"message"`
+	TotalCommits int    `json:"totalCommits"`
+}
+
+// GetBranchHead handles GET /api/repos/{owner}/{repo}/refs/{branch}/head
+func (h *APIHandler) GetBranchHead(w http.ResponseWriter, r *http.Request) {
+	owner := chi.URLParam(r, "owner")
+	repo := chi.URLParam(r, "repo")
+	branch := chi.URLParam(r, "branch")
+
+	_, localRepoPath, ok := h.authorizeGitRead(&w, r, owner, repo)
+	if !ok {
+		return
+	}
+
+	writeEmpty := func() {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(BranchHeadInfo{})
+	}
+
+	// Head commit (1 row)
+	logCmd := exec.Command("git", "--git-dir", localRepoPath, "log", "-n", "1", `--format=%H|%an|%ae|%ad|%s`, branch)
+	var logOut, logErr bytes.Buffer
+	logCmd.Stdout = &logOut
+	logCmd.Stderr = &logErr
+	if err := logCmd.Run(); err != nil {
+		errStr := logErr.String()
+		if strings.Contains(errStr, "does not have any commits") || strings.Contains(errStr, "fatal: bad default revision") || strings.Contains(errStr, "unknown revision") {
+			writeEmpty()
+			return
+		}
+		http.Error(w, "Git error: "+errStr, http.StatusInternalServerError)
+		return
+	}
+
+	parts := strings.SplitN(strings.TrimSpace(logOut.String()), "|", 5)
+	if len(parts) < 5 {
+		writeEmpty()
+		return
+	}
+
+	// Total commit count
+	countCmd := exec.Command("git", "--git-dir", localRepoPath, "rev-list", "--count", branch)
+	var countOut bytes.Buffer
+	countCmd.Stdout = &countOut
+	_ = countCmd.Run()
+	total, _ := strconv.Atoi(strings.TrimSpace(countOut.String()))
+
+	head := BranchHeadInfo{
+		SHA:          parts[0],
+		AuthorName:   parts[1],
+		AuthorEmail:  parts[2],
+		Date:         parts[3],
+		Message:      parts[4],
+		TotalCommits: total,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(head)
+}
+
 func (h *APIHandler) HandleLFSDownload(w http.ResponseWriter, r *http.Request) {
 	owner := chi.URLParam(r, "owner")
 	repoParam := chi.URLParam(r, "repo")

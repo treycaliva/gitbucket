@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../apiClient';
 import { authService } from '../authService';
 import BranchProtectionModal from '../components/BranchProtectionModal';
+import BranchTagPicker from '../components/BranchTagPicker';
+import LatestCommitBar from '../components/LatestCommitBar';
 import {
   Folder,
   FileCode,
@@ -119,6 +121,8 @@ git push -u origin main`}
   );
 }
 
+const COMMITS_PAGE_SIZE = 50;
+
 export default function Repository({ user, owner, repo, initialTab = 'code', initialPath = '', prNumber, onNavigate }) {
   const [meta, setMeta] = useState(null);
   const activeTab = initialTab;
@@ -139,6 +143,9 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [codeowners, setCodeowners] = useState({}); // map: entry name → ["@alice", ...]
   const [fileContent, setFileContent] = useState('');
   const [commits, setCommits] = useState([]);
+  const [commitsLoading, setCommitsLoading] = useState(false);
+  const [commitsHasMore, setCommitsHasMore] = useState(true);
+  const [commitsError, setCommitsError] = useState('');
   const [readmeContent, setReadmeContent] = useState('');
   
   // States
@@ -358,8 +365,11 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
             }
           }
         } else if (activeTab === 'commits') {
-          const commitList = await apiClient.get(`/api/repos/${owner}/${repo}/commits/${currentBranch}`);
-          setCommits(commitList);
+          setCommitsError('');
+          const commitList = await apiClient.get(`/api/repos/${owner}/${repo}/commits/${currentBranch}?limit=${COMMITS_PAGE_SIZE}&offset=0`);
+          const list = commitList || [];
+          setCommits(list);
+          setCommitsHasMore(list.length === COMMITS_PAGE_SIZE);
         }
       } catch (err) {
         console.error(err);
@@ -404,6 +414,24 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
     const parts = currentPath.split('/');
     const newPath = parts.slice(0, index + 1).join('/');
     setCurrentPath(newPath);
+  };
+
+  const loadMoreCommits = async () => {
+    if (commitsLoading || !commitsHasMore) return;
+    setCommitsLoading(true);
+    setCommitsError('');
+    try {
+      const next = await apiClient.get(
+        `/api/repos/${owner}/${repo}/commits/${currentBranch}?limit=${COMMITS_PAGE_SIZE}&offset=${commits.length}`
+      );
+      const list = next || [];
+      setCommits((prev) => [...prev, ...list]);
+      setCommitsHasMore(list.length === COMMITS_PAGE_SIZE);
+    } catch (err) {
+      setCommitsError(err.message || 'Failed to load more commits');
+    } finally {
+      setCommitsLoading(false);
+    }
   };
 
   const handleDeleteRepository = async () => {
@@ -593,71 +621,47 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 gap: '1rem'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '0.5rem',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid var(--border-color)',
-                    padding: '0.4rem 0.8rem',
-                    borderRadius: '6px',
-                    fontSize: '0.9rem'
-                  }}>
-                    <GitBranch size={16} style={{ color: '#38bdf8' }} />
-                    <select
-                      value={currentBranch}
-                      onChange={(e) => {
-                        setCurrentBranch(e.target.value);
-                        setViewingFile(null);
-                        setFileContent('');
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#f8fafc',
-                        fontFamily: 'inherit',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        outline: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {meta.branches && meta.branches.map(b => (
-                        <option key={b} value={b} style={{ background: '#0f172a' }}>{b}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <BranchTagPicker
+                    owner={owner}
+                    repo={repo}
+                    branches={meta.branches || []}
+                    defaultBranch={meta.defaultBranch || 'main'}
+                    currentBranch={currentBranch}
+                    onChange={(ref) => {
+                      setCurrentBranch(ref);
+                      setViewingFile(null);
+                      setFileContent('');
+                    }}
+                  />
 
-                  {/* Breadcrumbs */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
-                    <span 
-                      style={{ color: '#38bdf8', fontWeight: 600, cursor: 'pointer' }}
-                      onClick={() => handleBreadcrumbClick(-1)}
-                    >
-                      {repo}
-                    </span>
-                    {currentPath.split('/').filter(Boolean).map((part, i) => (
-                      <React.Fragment key={i}>
-                        <span style={{ color: '#64748b' }}>/</span>
-                        <span 
-                          style={{ 
-                            color: i === currentPath.split('/').filter(Boolean).length - 1 && !viewingFile ? '#f8fafc' : '#38bdf8', 
-                            fontWeight: i === currentPath.split('/').filter(Boolean).length - 1 && !viewingFile ? 600 : 400,
-                            cursor: 'pointer' 
-                          }}
-                          onClick={() => handleBreadcrumbClick(i)}
-                        >
-                          {part}
-                        </span>
-                      </React.Fragment>
-                    ))}
-                    {viewingFile && (
-                      <>
-                        <span style={{ color: '#64748b' }}>/</span>
-                        <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
-                      </>
-                    )}
-                  </div>
+                  {(currentPath || viewingFile) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
+                      {currentPath.split('/').filter(Boolean).map((part, i, arr) => {
+                        const isLast = i === arr.length - 1 && !viewingFile;
+                        return (
+                          <React.Fragment key={i}>
+                            {i > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                            <span
+                              style={{
+                                color: isLast ? '#f8fafc' : '#38bdf8',
+                                fontWeight: isLast ? 600 : 400,
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => handleBreadcrumbClick(i)}
+                            >
+                              {part}
+                            </span>
+                          </React.Fragment>
+                        );
+                      })}
+                      {viewingFile && (
+                        <>
+                          {currentPath.split('/').filter(Boolean).length > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                          <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
                 
                 {viewingFile && (
@@ -686,6 +690,14 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
               ) : (
                 /* B. If viewing a Folder (Tree) */
                 <div>
+                  {currentBranch && (
+                    <LatestCommitBar
+                      owner={owner}
+                      repo={repo}
+                      branch={currentBranch}
+                      onViewCommits={() => onNavigate('repository', { owner, repo, tab: 'commits' })}
+                    />
+                  )}
                   <div className="file-list">
                     <div className="file-header">
                       <span>Files</span>
@@ -863,6 +875,21 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                     <span className="commit-sha">{commit.sha.substring(0, 7)}</span>
                   </div>
                 ))
+              )}
+              {commitsError && (
+                <div className="error-box" style={{ margin: '0.5rem 1rem' }}>{commitsError}</div>
+              )}
+              {commitsHasMore && commits.length > 0 && (
+                <div className="load-more-row">
+                  <button
+                    type="button"
+                    className="load-more-btn"
+                    onClick={loadMoreCommits}
+                    disabled={commitsLoading}
+                  >
+                    {commitsLoading ? 'Loading...' : 'Load more'}
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -1216,6 +1243,7 @@ function PullRequestList({ owner, repo, onNavigate }) {
   const [pulls, setPulls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [prFilter, setPrFilter] = useState('open');
 
   useEffect(() => {
     const fetchPulls = async () => {
@@ -1231,6 +1259,12 @@ function PullRequestList({ owner, repo, onNavigate }) {
     fetchPulls();
   }, [owner, repo]);
 
+  const counts = pulls.reduce(
+    (acc, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc; },
+    { open: 0, closed: 0, merged: 0 }
+  );
+  const filteredPulls = pulls.filter((p) => p.status === prFilter);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1240,7 +1274,7 @@ function PullRequestList({ owner, repo, onNavigate }) {
             {pulls.length}
           </span>
         </div>
-        <button 
+        <button
           className="btn btn-primary"
           style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           onClick={() => onNavigate('pull_new', { owner, repo })}
@@ -1248,6 +1282,24 @@ function PullRequestList({ owner, repo, onNavigate }) {
           <GitPullRequest size={16} />
           New Pull Request
         </button>
+      </div>
+
+      <div className="pr-pills">
+        {[
+          { key: 'open', label: 'Open' },
+          { key: 'closed', label: 'Closed' },
+          { key: 'merged', label: 'Merged' },
+        ].map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            className={`pr-pill ${prFilter === p.key ? 'active' : ''}`}
+            onClick={() => setPrFilter(p.key)}
+          >
+            {p.label}
+            <span className="pr-pill-count">{counts[p.key] || 0}</span>
+          </button>
+        ))}
       </div>
 
       {loading && (
@@ -1262,26 +1314,32 @@ function PullRequestList({ owner, repo, onNavigate }) {
         </div>
       )}
 
-      {!loading && !error && pulls.length === 0 && (
+      {!loading && !error && filteredPulls.length === 0 && (
         <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
           <GitPullRequest size={48} style={{ color: '#64748b' }} />
-          <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f8fafc' }}>No Pull Requests Yet</h3>
-          <p style={{ margin: 0, color: '#94a3b8', maxWidth: '400px' }}>
-            Pull requests let you propose changes to branches, review code, and merge updates into other branches.
-          </p>
-          <button 
-            className="btn btn-secondary"
-            onClick={() => onNavigate('pull_new', { owner, repo })}
-            style={{ marginTop: '0.5rem' }}
-          >
-            Create first pull request
-          </button>
+          <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#f8fafc' }}>
+            No {prFilter} pull requests
+          </h3>
+          {pulls.length === 0 && (
+            <>
+              <p style={{ margin: 0, color: '#94a3b8', maxWidth: '400px' }}>
+                Pull requests let you propose changes to branches, review code, and merge updates into other branches.
+              </p>
+              <button
+                className="btn btn-secondary"
+                onClick={() => onNavigate('pull_new', { owner, repo })}
+                style={{ marginTop: '0.5rem' }}
+              >
+                Create first pull request
+              </button>
+            </>
+          )}
         </div>
       )}
 
-      {!loading && !error && pulls.length > 0 && (
+      {!loading && !error && filteredPulls.length > 0 && (
         <div className="pr-list">
-          {pulls.map(pr => {
+          {filteredPulls.map(pr => {
             let statusBadgeClass = 'badge-pr-open';
             if (pr.status === 'merged') statusBadgeClass = 'badge-pr-merged';
             if (pr.status === 'closed') statusBadgeClass = 'badge-pr-closed';

@@ -86,6 +86,8 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/tree/{branch}/*", h.GetTree)
 			r.Get("/repos/{owner}/{repo}/blob/{branch}/*", h.GetBlob)
 			r.Get("/repos/{owner}/{repo}/codeowners", h.CodeOwnersHandler)
+			r.Get("/repos/{owner}/{repo}/tags", h.ListTags)
+			r.Get("/repos/{owner}/{repo}/refs/{branch}/head", h.GetBranchHead)
 
 			r.Get("/repos/{owner}/{repo}/pulls", h.ListPullRequests)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPullRequest)
@@ -803,6 +805,9 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 			limit = l
 		}
+	}
+	if limit > 200 {
+		limit = 200
 	}
 
 	offset := 0
