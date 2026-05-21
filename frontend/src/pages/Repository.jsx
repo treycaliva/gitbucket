@@ -117,6 +117,8 @@ git push -u origin main`}
   );
 }
 
+const COMMITS_PAGE_SIZE = 50;
+
 export default function Repository({ user, owner, repo, initialTab = 'code', initialPath = '', prNumber, onNavigate }) {
   const [meta, setMeta] = useState(null);
   const activeTab = initialTab;
@@ -137,6 +139,9 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [codeowners, setCodeowners] = useState({}); // map: entry name → ["@alice", ...]
   const [fileContent, setFileContent] = useState('');
   const [commits, setCommits] = useState([]);
+  const [commitsLoading, setCommitsLoading] = useState(false);
+  const [commitsHasMore, setCommitsHasMore] = useState(true);
+  const [commitsError, setCommitsError] = useState('');
   const [readmeContent, setReadmeContent] = useState('');
   
   // States
@@ -354,8 +359,11 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
             }
           }
         } else if (activeTab === 'commits') {
-          const commitList = await apiClient.get(`/api/repos/${owner}/${repo}/commits/${currentBranch}`);
-          setCommits(commitList);
+          setCommitsError('');
+          const commitList = await apiClient.get(`/api/repos/${owner}/${repo}/commits/${currentBranch}?limit=${COMMITS_PAGE_SIZE}&offset=0`);
+          const list = commitList || [];
+          setCommits(list);
+          setCommitsHasMore(list.length === COMMITS_PAGE_SIZE);
         }
       } catch (err) {
         console.error(err);
@@ -400,6 +408,24 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
     const parts = currentPath.split('/');
     const newPath = parts.slice(0, index + 1).join('/');
     setCurrentPath(newPath);
+  };
+
+  const loadMoreCommits = async () => {
+    if (commitsLoading || !commitsHasMore) return;
+    setCommitsLoading(true);
+    setCommitsError('');
+    try {
+      const next = await apiClient.get(
+        `/api/repos/${owner}/${repo}/commits/${currentBranch}?limit=${COMMITS_PAGE_SIZE}&offset=${commits.length}`
+      );
+      const list = next || [];
+      setCommits((prev) => [...prev, ...list]);
+      setCommitsHasMore(list.length === COMMITS_PAGE_SIZE);
+    } catch (err) {
+      setCommitsError(err.message || 'Failed to load more commits');
+    } finally {
+      setCommitsLoading(false);
+    }
   };
 
   const handleDeleteRepository = async () => {
@@ -844,6 +870,21 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                     <span className="commit-sha">{commit.sha.substring(0, 7)}</span>
                   </div>
                 ))
+              )}
+              {commitsError && (
+                <div className="error-box" style={{ margin: '0.5rem 1rem' }}>{commitsError}</div>
+              )}
+              {commitsHasMore && commits.length > 0 && (
+                <div className="load-more-row">
+                  <button
+                    type="button"
+                    className="load-more-btn"
+                    onClick={loadMoreCommits}
+                    disabled={commitsLoading}
+                  >
+                    {commitsLoading ? 'Loading...' : 'Load more'}
+                  </button>
+                </div>
               )}
             </div>
           )}
