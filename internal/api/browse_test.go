@@ -16,6 +16,7 @@ import (
 
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
+	"gitbucket/internal/sync"
 )
 
 func TestBrowseAPIs(t *testing.T) {
@@ -39,7 +40,7 @@ func TestBrowseAPIs(t *testing.T) {
 	defer os.RemoveAll(tempReposRoot)
 
 	authHandler := auth.NewAuthHandler(true, nil, client)
-	apiHandler := NewAPIHandler(client, nil, "", tempReposRoot, authHandler)
+	apiHandler := NewAPIHandler(client, nil, "", tempReposRoot, authHandler, sync.NewKMSClient(nil, ""))
 
 	r := chi.NewRouter()
 	apiHandler.RegisterRoutes(r)

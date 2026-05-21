@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"net"
@@ -17,11 +18,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"google.golang.org/api/option"
 
+	kms "cloud.google.com/go/kms/apiv1"
+
 	"gitbucket/internal/api"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/config"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
+	"gitbucket/internal/sync"
 )
 
 func getClientIP(r *http.Request) string {
@@ -64,6 +68,42 @@ func ipGatingMiddleware(restrictedIP string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// errorLoggerResponseWriter captures status and (for 5xx) the first chunk of
+// response body so the errorLogger middleware can log the actual error message
+// after the handler returns.
+type errorLoggerResponseWriter struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+const errorLoggerBodyLimit = 4096
+
+func (w *errorLoggerResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *errorLoggerResponseWriter) Write(b []byte) (int, error) {
+	if w.status >= 500 && w.body.Len() < errorLoggerBodyLimit {
+		w.body.Write(b[:min(len(b), errorLoggerBodyLimit-w.body.Len())])
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// errorLogger logs the response body of any 5xx response. Without this,
+// http.Error(w, err.Error(), 500) sends the underlying error to the client
+// but leaves no record server-side, which makes prod debugging painful.
+func errorLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &errorLoggerResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if rec.status >= 500 {
+			log.Printf("[5xx] %s %s -> %d: %s", r.Method, r.URL.Path, rec.status, strings.TrimSpace(rec.body.String()))
+		}
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -137,10 +177,18 @@ func main() {
 			log.Fatalf("failed to initialize GCS client: %v", err)
 		}
 		defer storageClient.Close()
-		log.Printf("GCS client initialized for bucket %s", cfg.GCSBucket)
-	} else {
-		log.Println("Warning: GCSBucket is empty, GCS client not initialized")
 	}
+	// Initialize Cloud KMS client if configured and not in dev mode
+	var kmsKeyMgmtClient *kms.KeyManagementClient
+	if cfg.KMSKeyName != "" && !cfg.DevMode {
+		kmsKeyMgmtClient, err = kms.NewKeyManagementClient(ctx)
+		if err != nil {
+			log.Fatalf("failed to initialize Cloud KMS client: %v", err)
+		}
+		defer kmsKeyMgmtClient.Close()
+		log.Printf("Cloud KMS client initialized for key: %s", cfg.KMSKeyName)
+	}
+	syncKMSClient := sync.NewKMSClient(kmsKeyMgmtClient, cfg.KMSKeyName)
 
 	// Initialize Auth Handler
 	authHandler := auth.NewAuthHandler(cfg.DevMode, authClient, firestoreClient)
@@ -148,11 +196,12 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(errorLogger)
 	r.Use(ipGatingMiddleware(cfg.RestrictedIP))
 	r.Use(corsMiddleware)
 
 	// API Routes
-	apiHandler := api.NewAPIHandler(firestoreClient, storageClient, cfg.GCSBucket, cfg.LocalReposRoot, authHandler)
+	apiHandler := api.NewAPIHandler(firestoreClient, storageClient, cfg.GCSBucket, cfg.LocalReposRoot, authHandler, syncKMSClient)
 	apiHandler.RegisterRoutes(r)
 
 	// Static Assets & SPA Fallback

@@ -1798,21 +1798,46 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     }
   };
 
-  const handleClose = async () => {
-    if (!window.confirm('Are you sure you want to close this pull request without merging?')) return;
-    setActionLoading(true);
-    setActionError('');
-    try {
-      const resp = await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/close`);
-      if (resp.success) {
-        setPr(prev => ({ ...prev, status: 'closed' }));
-      }
-    } catch (err) {
-      setActionError(err.message || 'Failed to close pull request.');
-    } finally {
-      setActionLoading(false);
-    }
-  };
+	const handleClose = async () => {
+		if (!window.confirm('Are you sure you want to close this pull request without merging?')) return;
+		setActionLoading(true);
+		setActionError('');
+		try {
+			const resp = await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/close`);
+			if (resp.success) {
+				setPr(prev => ({ ...prev, status: 'closed' }));
+			}
+		} catch (err) {
+			setActionError(err.message || 'Failed to close pull request.');
+		} finally {
+			setActionLoading(false);
+		}
+	};
+
+	const handleUpdateBranch = async (strategy) => {
+		if (!window.confirm(`Are you sure you want to update this branch using ${strategy}?`)) return;
+		setActionLoading(true);
+		setActionError('');
+		try {
+			const resp = await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/update`, { strategy });
+			if (resp.success) {
+				const [prData, commitsData, diffData] = await Promise.all([
+					apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}`),
+					apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/commits`).catch(() => []),
+					apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' }))
+				]);
+				setPr(prData);
+				setCommits(commitsData || []);
+				setDiff(diffData?.rawDiff || '');
+			} else {
+				setActionError(resp.message || `Failed to update branch using ${strategy}.`);
+			}
+		} catch (err) {
+			setActionError(err.message || `Failed to update branch using ${strategy}. There might be unresolvable conflicts.`);
+		} finally {
+			setActionLoading(false);
+		}
+	};
 
   if (loading) {
     return (
@@ -2023,56 +2048,106 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
             {pr.status === 'open' && (
               <div className="pr-merge-box" style={{
                 display: 'flex',
-                alignItems: 'center',
-                gap: '1.25rem',
+                flexDirection: 'column',
+                gap: '1rem',
                 padding: '1.25rem',
                 background: 'rgba(30, 41, 59, 0.25)',
                 border: '1px solid var(--border-color)',
                 borderRadius: 'var(--border-radius)',
                 marginTop: '1rem'
               }}>
-                <div className="merge-status-indicator success" style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  background: 'rgba(16, 185, 129, 0.1)',
-                  border: '1px solid rgba(16, 185, 129, 0.2)',
-                  color: '#10b981',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0
-                }}>
-                  <GitMerge size={20} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                  <div className="merge-status-indicator" style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    background: pr.mergeable === true 
+                      ? 'rgba(16, 185, 129, 0.1)' 
+                      : pr.mergeable === false 
+                        ? 'rgba(239, 68, 68, 0.1)' 
+                        : 'rgba(148, 163, 184, 0.1)',
+                    border: pr.mergeable === true 
+                      ? '1px solid rgba(16, 185, 129, 0.2)' 
+                      : pr.mergeable === false 
+                        ? '1px solid rgba(239, 68, 68, 0.2)' 
+                        : '1px solid rgba(148, 163, 184, 0.2)',
+                    color: pr.mergeable === true 
+                      ? '#10b981' 
+                      : pr.mergeable === false 
+                        ? '#ef4444' 
+                        : '#94a3b8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    {pr.mergeable === true && <GitMerge size={20} />}
+                    {pr.mergeable === false && <AlertTriangle size={20} />}
+                    {(pr.mergeable === undefined || pr.mergeable === null) && <span className="loader" style={{ width: '18px', height: '18px', borderWidth: '2px' }}></span>}
+                  </div>
+                  <div className="merge-box-content" style={{ flex: 1 }}>
+                    <h3 className="merge-box-title" style={{ color: '#f8fafc', margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+                      {pr.mergeable === true && "This branch has no conflicts"}
+                      {pr.mergeable === false && "This branch has conflicts that must be resolved"}
+                      {(pr.mergeable === undefined || pr.mergeable === null) && "Checking mergeability..."}
+                    </h3>
+                    <div className="merge-box-desc" style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
+                      {pr.mergeable === true && "Merging can be performed automatically."}
+                      {pr.mergeable === false && "Conflicts must be resolved before this pull request can be merged."}
+                      {(pr.mergeable === undefined || pr.mergeable === null) && "We're checking if this branch can be merged cleanly."}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={handleClose}
+                      disabled={actionLoading}
+                    >
+                      Close
+                    </button>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={handleMerge}
+                      disabled={actionLoading || pr.mergeable !== true}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                    >
+                      {actionLoading ? (
+                        <span className="loader" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
+                      ) : (
+                        <>
+                          <GitMerge size={16} />
+                          Merge
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                <div className="merge-box-content" style={{ flex: 1 }}>
-                  <h3 className="merge-box-title" style={{ color: '#f8fafc', margin: 0, fontSize: '1rem', fontWeight: 600 }}>This branch has no conflicts</h3>
-                  <div className="merge-box-desc" style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Merging can be performed automatically.</div>
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <button 
-                    className="btn btn-secondary" 
-                    onClick={handleClose}
-                    disabled={actionLoading}
-                  >
-                    Close
-                  </button>
-                  <button 
-                    className="btn btn-primary" 
-                    onClick={handleMerge}
-                    disabled={actionLoading}
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                  >
-                    {actionLoading ? (
-                      <span className="loader" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
-                    ) : (
-                      <>
-                        <GitMerge size={16} />
-                        Merge
-                      </>
-                    )}
-                  </button>
-                </div>
+
+                {pr.mergeable === false && (
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)', paddingTop: '0.75rem' }}>
+                    <span style={{ color: '#94a3b8', fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>
+                      You can attempt to update the source branch automatically to resolve conflicts:
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        onClick={() => handleUpdateBranch('merge')}
+                        disabled={actionLoading}
+                      >
+                        Update via Merge
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        onClick={() => handleUpdateBranch('rebase')}
+                        disabled={actionLoading}
+                      >
+                        Update via Rebase
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
