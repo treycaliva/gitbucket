@@ -34,6 +34,8 @@ func RegisterV3Routes(r chi.Router, h *V3Handler) {
 		r.Get("/repos/{owner}/{repo}/git/ref/*", h.GetRef)
 		r.Get("/repos/{owner}/{repo}/git/trees/{sha}", h.GetTree)
 		r.Get("/repos/{owner}/{repo}/pulls", h.ListPulls)
+		r.Post("/repos/{owner}/{repo}/pulls", h.CreatePull)
 		r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPull)
+		r.Patch("/repos/{owner}/{repo}/pulls/{number}", h.UpdatePull)
 	})
 }
