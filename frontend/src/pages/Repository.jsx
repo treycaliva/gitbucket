@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../apiClient';
+import { authService } from '../authService';
 import BranchProtectionModal from '../components/BranchProtectionModal';
 import BranchTagPicker from '../components/BranchTagPicker';
 import LatestCommitBar from '../components/LatestCommitBar';
@@ -20,7 +21,10 @@ import {
   AlertTriangle,
   GitPullRequest,
   MessageSquare,
-  GitMerge
+  GitMerge,
+  ChevronRight,
+  ChevronDown,
+  Search
 } from 'lucide-react';
 
 function renderReadme(markdown) {
@@ -202,7 +206,9 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
     }
   };
 
-  const cloneUrl = `${window.location.origin}/r/${owner}/${repo}.git`;
+  const config = authService.getConfig();
+  const gitBaseUrl = (config && config.gitUrl) ? config.gitUrl : window.location.origin;
+  const cloneUrl = `${gitBaseUrl}/r/${owner}/${repo}.git`;
   const isOwner = user && user.username && user.username.toLowerCase() === owner.toLowerCase();
 
   // Load collaborators when entering Settings tab as owner
@@ -440,7 +446,6 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
     }
   };
 
-  // Simple Markdown Renderer
   if (loading) {
     return (
       <div className="loader-container">
@@ -1573,6 +1578,144 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
   const [error, setError] = useState('');
   const [prTab, setPrTab] = useState('conversation'); // 'conversation', 'commits', 'diff'
 
+  // Detailed Diff and File Tree States
+  const [filterText, setFilterText] = useState('');
+  const [collapsedPaths, setCollapsedPaths] = useState({});
+  const [collapsedFiles, setCollapsedFiles] = useState({});
+  const [viewedFiles, setViewedFiles] = useState({});
+  const [activeFile, setActiveFile] = useState(null);
+  const [activeHighlight, setActiveHighlight] = useState(null);
+
+  const parsedFiles = useMemo(() => {
+    return parseDiff(diff);
+  }, [diff]);
+
+  const fileTree = useMemo(() => {
+    return buildFileTree(parsedFiles);
+  }, [parsedFiles]);
+
+  const filteredTree = useMemo(() => {
+    if (!filterText) return fileTree;
+    const filterLower = filterText.toLowerCase();
+
+    const checkMatch = (node) => {
+      if (!node.isDirectory) {
+        return node.name.toLowerCase().includes(filterLower) || node.path.toLowerCase().includes(filterLower);
+      }
+      const matchedChildren = node.children.filter(checkMatch);
+      return matchedChildren.length > 0;
+    };
+
+    const copyAndFilter = (nodeList) => {
+      return nodeList
+        .filter(checkMatch)
+        .map(node => {
+          if (node.isDirectory) {
+            return {
+              ...node,
+              children: copyAndFilter(node.children)
+            };
+          }
+          return node;
+        });
+    };
+
+    return copyAndFilter(fileTree);
+  }, [fileTree, filterText]);
+
+  const filteredFiles = useMemo(() => {
+    if (!filterText) return parsedFiles;
+    const filterLower = filterText.toLowerCase();
+    return parsedFiles.filter(f => f.path.toLowerCase().includes(filterLower));
+  }, [parsedFiles, filterText]);
+
+  const toggleFolder = (path) => {
+    setCollapsedPaths(prev => ({
+      ...prev,
+      [path]: !prev[path]
+    }));
+  };
+
+  const toggleFileCollapse = (path) => {
+    setCollapsedFiles(prev => ({
+      ...prev,
+      [path]: !prev[path]
+    }));
+  };
+
+  const toggleViewed = (path) => {
+    setViewedFiles(prev => {
+      const next = { ...prev, [path]: !prev[path] };
+      if (next[path]) {
+        setCollapsedFiles(fPrev => ({ ...fPrev, [path]: true }));
+      } else {
+        setCollapsedFiles(fPrev => ({ ...fPrev, [path]: false }));
+      }
+      return next;
+    });
+  };
+
+  const scrollToFile = (path) => {
+    setActiveFile(path);
+    const element = document.getElementById(`diff-file-${path}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveHighlight(path);
+      setTimeout(() => {
+        setActiveHighlight(null);
+      }, 1500);
+    }
+  };
+
+  const renderTreeNode = (node, depth = 0) => {
+    const isCollapsed = collapsedPaths[node.path];
+    const isNodeActive = activeFile === node.path;
+    const isNodeViewed = !node.isDirectory && viewedFiles[node.path];
+
+    if (node.isDirectory) {
+      return (
+        <div key={node.path}>
+          <div
+            className={`diff-tree-node ${isNodeActive ? 'active' : ''}`}
+            style={{ paddingLeft: `${depth * 12 + 8}px` }}
+            onClick={() => toggleFolder(node.path)}
+          >
+            <span className="diff-tree-icon">
+              {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            </span>
+            <span className="diff-tree-icon" style={{ color: '#f59e0b' }}>
+              <Folder size={14} fill="currentColor" fillOpacity={0.1} />
+            </span>
+            <span className="diff-tree-label">{node.name}</span>
+            <span className="diff-tree-stats">
+              {node.additions > 0 && <span className="diff-tree-stat-add">+{node.additions}</span>}
+              {node.deletions > 0 && <span className="diff-tree-stat-del">-{node.deletions}</span>}
+            </span>
+          </div>
+          {!isCollapsed && node.children.map(child => renderTreeNode(child, depth + 1))}
+        </div>
+      );
+    } else {
+      return (
+        <div
+          key={node.path}
+          className={`diff-tree-node ${isNodeActive ? 'active' : ''} ${isNodeViewed ? 'viewed' : ''}`}
+          style={{ paddingLeft: `${depth * 12 + 20}px` }}
+          onClick={() => scrollToFile(node.path)}
+        >
+          <span className="diff-tree-icon" style={{ color: isNodeViewed ? '#64748b' : '#38bdf8' }}>
+            <FileCode size={14} />
+          </span>
+          <span className="diff-tree-label" title={node.path}>{node.name}</span>
+          <span className="diff-tree-stats">
+            {node.additions > 0 && <span className="diff-tree-stat-add">+{node.additions}</span>}
+            {node.deletions > 0 && <span className="diff-tree-stat-del">-{node.deletions}</span>}
+          </span>
+        </div>
+      );
+    }
+  };
+
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
 
@@ -1709,21 +1852,46 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     }
   };
 
-  const handleClose = async () => {
-    if (!window.confirm('Are you sure you want to close this pull request without merging?')) return;
-    setActionLoading(true);
-    setActionError('');
-    try {
-      const resp = await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/close`);
-      if (resp.success) {
-        setPr(prev => ({ ...prev, status: 'closed' }));
-      }
-    } catch (err) {
-      setActionError(err.message || 'Failed to close pull request.');
-    } finally {
-      setActionLoading(false);
-    }
-  };
+	const handleClose = async () => {
+		if (!window.confirm('Are you sure you want to close this pull request without merging?')) return;
+		setActionLoading(true);
+		setActionError('');
+		try {
+			const resp = await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/close`);
+			if (resp.success) {
+				setPr(prev => ({ ...prev, status: 'closed' }));
+			}
+		} catch (err) {
+			setActionError(err.message || 'Failed to close pull request.');
+		} finally {
+			setActionLoading(false);
+		}
+	};
+
+	const handleUpdateBranch = async (strategy) => {
+		if (!window.confirm(`Are you sure you want to update this branch using ${strategy}?`)) return;
+		setActionLoading(true);
+		setActionError('');
+		try {
+			const resp = await apiClient.post(`/api/repos/${owner}/${repo}/pulls/${prNumber}/update`, { strategy });
+			if (resp.success) {
+				const [prData, commitsData, diffData] = await Promise.all([
+					apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}`),
+					apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/commits`).catch(() => []),
+					apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' }))
+				]);
+				setPr(prData);
+				setCommits(commitsData || []);
+				setDiff(diffData?.rawDiff || '');
+			} else {
+				setActionError(resp.message || `Failed to update branch using ${strategy}.`);
+			}
+		} catch (err) {
+			setActionError(err.message || `Failed to update branch using ${strategy}. There might be unresolvable conflicts.`);
+		} finally {
+			setActionLoading(false);
+		}
+	};
 
   if (loading) {
     return (
@@ -1760,33 +1928,7 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     statusBadgeClass = 'badge-pr-closed';
   }
 
-  const renderDiffLines = (rawDiff) => {
-    if (!rawDiff) return <div style={{ color: '#64748b', fontStyle: 'italic', padding: '2rem', textAlign: 'center' }}>No file modifications in this diff.</div>;
-    const lines = rawDiff.split('\n');
-    return (
-      <pre style={{ margin: 0, padding: '1.25rem', overflowX: 'auto', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', lineHeight: '1.5' }}>
-        {lines.map((line, idx) => {
-          let color = '#e2e8f0';
-          let bg = 'transparent';
-          if (line.startsWith('+') && !line.startsWith('+++')) {
-            color = '#4ade80';
-            bg = 'rgba(74, 222, 128, 0.04)';
-          } else if (line.startsWith('-') && !line.startsWith('---')) {
-            color = '#f87171';
-            bg = 'rgba(248, 113, 113, 0.04)';
-          } else if (line.startsWith('@@')) {
-            color = '#38bdf8';
-            bg = 'rgba(56, 189, 248, 0.05)';
-          }
-          return (
-            <div key={idx} style={{ color, backgroundColor: bg, padding: '0.1rem 0.25rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {line}
-            </div>
-          );
-        })}
-      </pre>
-    );
-  };
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -1960,56 +2102,106 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
             {pr.status === 'open' && (
               <div className="pr-merge-box" style={{
                 display: 'flex',
-                alignItems: 'center',
-                gap: '1.25rem',
+                flexDirection: 'column',
+                gap: '1rem',
                 padding: '1.25rem',
                 background: 'rgba(30, 41, 59, 0.25)',
                 border: '1px solid var(--border-color)',
                 borderRadius: 'var(--border-radius)',
                 marginTop: '1rem'
               }}>
-                <div className="merge-status-indicator success" style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  background: 'rgba(16, 185, 129, 0.1)',
-                  border: '1px solid rgba(16, 185, 129, 0.2)',
-                  color: '#10b981',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0
-                }}>
-                  <GitMerge size={20} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                  <div className="merge-status-indicator" style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    background: pr.mergeable === true 
+                      ? 'rgba(16, 185, 129, 0.1)' 
+                      : pr.mergeable === false 
+                        ? 'rgba(239, 68, 68, 0.1)' 
+                        : 'rgba(148, 163, 184, 0.1)',
+                    border: pr.mergeable === true 
+                      ? '1px solid rgba(16, 185, 129, 0.2)' 
+                      : pr.mergeable === false 
+                        ? '1px solid rgba(239, 68, 68, 0.2)' 
+                        : '1px solid rgba(148, 163, 184, 0.2)',
+                    color: pr.mergeable === true 
+                      ? '#10b981' 
+                      : pr.mergeable === false 
+                        ? '#ef4444' 
+                        : '#94a3b8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    {pr.mergeable === true && <GitMerge size={20} />}
+                    {pr.mergeable === false && <AlertTriangle size={20} />}
+                    {(pr.mergeable === undefined || pr.mergeable === null) && <span className="loader" style={{ width: '18px', height: '18px', borderWidth: '2px' }}></span>}
+                  </div>
+                  <div className="merge-box-content" style={{ flex: 1 }}>
+                    <h3 className="merge-box-title" style={{ color: '#f8fafc', margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+                      {pr.mergeable === true && "This branch has no conflicts"}
+                      {pr.mergeable === false && "This branch has conflicts that must be resolved"}
+                      {(pr.mergeable === undefined || pr.mergeable === null) && "Checking mergeability..."}
+                    </h3>
+                    <div className="merge-box-desc" style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
+                      {pr.mergeable === true && "Merging can be performed automatically."}
+                      {pr.mergeable === false && "Conflicts must be resolved before this pull request can be merged."}
+                      {(pr.mergeable === undefined || pr.mergeable === null) && "We're checking if this branch can be merged cleanly."}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={handleClose}
+                      disabled={actionLoading}
+                    >
+                      Close
+                    </button>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={handleMerge}
+                      disabled={actionLoading || pr.mergeable !== true}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                    >
+                      {actionLoading ? (
+                        <span className="loader" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
+                      ) : (
+                        <>
+                          <GitMerge size={16} />
+                          Merge
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-                <div className="merge-box-content" style={{ flex: 1 }}>
-                  <h3 className="merge-box-title" style={{ color: '#f8fafc', margin: 0, fontSize: '1rem', fontWeight: 600 }}>This branch has no conflicts</h3>
-                  <div className="merge-box-desc" style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Merging can be performed automatically.</div>
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <button 
-                    className="btn btn-secondary" 
-                    onClick={handleClose}
-                    disabled={actionLoading}
-                  >
-                    Close
-                  </button>
-                  <button 
-                    className="btn btn-primary" 
-                    onClick={handleMerge}
-                    disabled={actionLoading}
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                  >
-                    {actionLoading ? (
-                      <span className="loader" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
-                    ) : (
-                      <>
-                        <GitMerge size={16} />
-                        Merge
-                      </>
-                    )}
-                  </button>
-                </div>
+
+                {pr.mergeable === false && (
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.06)', paddingTop: '0.75rem' }}>
+                    <span style={{ color: '#94a3b8', fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>
+                      You can attempt to update the source branch automatically to resolve conflicts:
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        onClick={() => handleUpdateBranch('merge')}
+                        disabled={actionLoading}
+                      >
+                        Update via Merge
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.35rem 0.8rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        onClick={() => handleUpdateBranch('rebase')}
+                        disabled={actionLoading}
+                      >
+                        Update via Rebase
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2274,15 +2466,310 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
       )}
 
       {prTab === 'diff' && (
-        <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', margin: 0 }}>Files Changed</h3>
+        <div className="diff-split-layout">
+          {/* Left Column: File Tree Sidebar */}
+          <div className="diff-sidebar">
+            <div className="diff-sidebar-header">
+              <span className="diff-sidebar-title">Files Changed</span>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <span style={{ position: 'absolute', left: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                  <Search size={14} />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Filter files..."
+                  className="text-input"
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  style={{
+                    paddingLeft: '2rem',
+                    fontSize: '0.85rem',
+                    width: '100%',
+                    background: 'rgba(0,0,0,0.2)',
+                    borderColor: 'var(--border-color)',
+                    height: '32px',
+                    borderRadius: '6px'
+                  }}
+                />
+              </div>
+            </div>
+            <div className="diff-tree-container">
+              {filteredTree.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic', padding: '1rem 0' }}>
+                  No matching files found.
+                </div>
+              ) : (
+                filteredTree.map(node => renderTreeNode(node))
+              )}
+            </div>
           </div>
-          <div style={{ background: 'rgba(0,0,0,0.15)' }}>
-            {renderDiffLines(diff)}
+
+          {/* Right Column: Diff Cards List */}
+          <div className="diff-main-content">
+            {filteredFiles.length === 0 ? (
+              <div className="glass-card" style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                No modified files to display.
+              </div>
+            ) : (
+              filteredFiles.map((file) => {
+                const isViewed = !!viewedFiles[file.path];
+                const isCollapsed = collapsedFiles[file.path] !== undefined ? collapsedFiles[file.path] : isViewed;
+                const isHighlight = activeHighlight === file.path;
+
+                return (
+                  <div
+                    key={file.path}
+                    id={`diff-file-${file.path}`}
+                    className={`diff-file-card ${isViewed ? 'viewed' : ''} ${isHighlight ? 'scroll-highlight' : ''}`}
+                  >
+                    <div className="diff-file-card-header">
+                      <div
+                        className="diff-file-card-header-left"
+                        onClick={() => toggleFileCollapse(file.path)}
+                      >
+                        <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                          {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                        </span>
+                        <span className="diff-file-card-path">{file.path}</span>
+                        <span className="diff-file-card-stats">
+                          {file.additions > 0 && <span style={{ color: 'var(--success)' }}>+{file.additions}</span>}
+                          {file.deletions > 0 && <span style={{ color: 'var(--error)' }}>-{file.deletions}</span>}
+                        </span>
+                      </div>
+                      <div className="diff-file-card-header-right">
+                        <button
+                          className="diff-file-card-action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigate('blob', { owner, repo, branch: pr.sourceBranch || 'main', path: file.path });
+                          }}
+                        >
+                          View file
+                        </button>
+                        <label className={`diff-viewed-label ${isViewed ? 'checked' : ''}`} onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isViewed}
+                            onChange={() => toggleViewed(file.path)}
+                          />
+                          Viewed
+                        </label>
+                      </div>
+                    </div>
+
+                    {!isCollapsed && (
+                      <div className="diff-file-card-body">
+                        {file.lines.length === 0 ? (
+                          <div style={{ padding: '1.5rem', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center' }}>
+                            No line changes (e.g. empty or binary file).
+                          </div>
+                        ) : (
+                          file.lines.map((line, idx) => (
+                            <div key={idx} className={`diff-line-row diff-row-${line.type}`}>
+                              <div className="diff-line-gutter diff-line-gutter-old">
+                                {line.oldLineNum !== null ? line.oldLineNum : ''}
+                              </div>
+                              <div className="diff-line-gutter diff-line-gutter-new">
+                                {line.newLineNum !== null ? line.newLineNum : ''}
+                              </div>
+                              <div className="diff-line-code">
+                                {line.content}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}
     </div>
   );
 }
+
+// Client-side diff parsing and tree building helpers
+const parseDiff = (rawDiff) => {
+  if (!rawDiff) return [];
+  const files = [];
+  const lines = rawDiff.split('\n');
+  let currentFile = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('diff --git ')) {
+      const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+      let path = '';
+      if (match) {
+        path = match[2];
+      } else {
+        const parts = line.substring(11).split(' ');
+        if (parts.length >= 2) {
+          path = parts[parts.length - 1].replace(/^b\//, '');
+        }
+      }
+      currentFile = {
+        path: path,
+        additions: 0,
+        deletions: 0,
+        type: 'modified',
+        rawLines: []
+      };
+      files.push(currentFile);
+    } else if (currentFile) {
+      currentFile.rawLines.push(line);
+      if (line.startsWith('--- ')) {
+        if (line.includes('/dev/null')) {
+          currentFile.type = 'added';
+        }
+      } else if (line.startsWith('+++ ')) {
+        if (line.includes('/dev/null')) {
+          currentFile.type = 'deleted';
+        }
+        const pathMatch = line.match(/^\+\+\+ b\/(.+)$/);
+        if (pathMatch && pathMatch[1] !== '/dev/null') {
+          currentFile.path = pathMatch[1];
+        }
+      } else if (line.startsWith('rename to ')) {
+        currentFile.type = 'rename';
+        currentFile.path = line.substring(10);
+      } else if (line.startsWith('new file mode ')) {
+        currentFile.type = 'added';
+      } else if (line.startsWith('deleted file mode ')) {
+        currentFile.type = 'deleted';
+      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+        currentFile.additions++;
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        currentFile.deletions++;
+      }
+    }
+  }
+
+  files.forEach(file => {
+    file.lines = parseFileDiffLines(file.rawLines);
+  });
+
+  return files;
+};
+
+const parseFileDiffLines = (rawLines) => {
+  const result = [];
+  let oldLineNum = 0;
+  let newLineNum = 0;
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+
+    if (line.startsWith('index ') || line.startsWith('new file mode') || line.startsWith('deleted file mode') || line.startsWith('similarity index') || line.startsWith('rename from') || line.startsWith('rename to')) {
+      continue;
+    }
+
+    if (line.startsWith('--- a/') || line.startsWith('--- /dev/null') || line.startsWith('+++ b/') || line.startsWith('+++ /dev/null')) {
+      continue;
+    }
+
+    if (line.startsWith('@@')) {
+      const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (match) {
+        oldLineNum = parseInt(match[1], 10);
+        newLineNum = parseInt(match[2], 10);
+      }
+      result.push({
+        type: 'hunk',
+        content: line,
+        oldLineNum: null,
+        newLineNum: null
+      });
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      result.push({
+        type: 'add',
+        content: line,
+        oldLineNum: null,
+        newLineNum: newLineNum
+      });
+      newLineNum++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      result.push({
+        type: 'del',
+        content: line,
+        oldLineNum: oldLineNum,
+        newLineNum: null
+      });
+      oldLineNum++;
+    } else {
+      result.push({
+        type: 'normal',
+        content: line,
+        oldLineNum: oldLineNum,
+        newLineNum: newLineNum
+      });
+      oldLineNum++;
+      newLineNum++;
+    }
+  }
+
+  return result;
+};
+
+const buildFileTree = (files) => {
+  const root = { name: 'root', path: '', isDirectory: true, children: [] };
+  
+  files.forEach((file, index) => {
+    const parts = file.path.split('/');
+    let current = root;
+    let currentPath = '';
+    
+    parts.forEach((part, partIndex) => {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      const isLast = partIndex === parts.length - 1;
+      
+      let child = current.children.find(c => c.name === part && c.isDirectory === !isLast);
+      if (!child) {
+        child = {
+          name: part,
+          path: currentPath,
+          isDirectory: !isLast,
+          children: [],
+          fileIndex: isLast ? index : undefined,
+          additions: 0,
+          deletions: 0
+        };
+        current.children.push(child);
+      }
+      
+      if (isLast) {
+        child.additions = file.additions;
+        child.deletions = file.deletions;
+      }
+      
+      current = child;
+    });
+  });
+
+  const calculateTreeStats = (nodes) => {
+    nodes.forEach(node => {
+      if (node.isDirectory) {
+        calculateTreeStats(node.children);
+        node.additions = node.children.reduce((sum, child) => sum + child.additions, 0);
+        node.deletions = node.children.reduce((sum, child) => sum + child.deletions, 0);
+      }
+    });
+  };
+
+  const sortTree = (node) => {
+    node.children.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    node.children.forEach(sortTree);
+  };
+  
+  calculateTreeStats(root.children);
+  sortTree(root);
+  return root.children;
+};
+

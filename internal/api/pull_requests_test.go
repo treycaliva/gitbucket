@@ -603,3 +603,237 @@ func TestMergePullRequest_BlockedByMergeAllowlist(t *testing.T) {
 	}
 }
 
+func TestPullRequestMergeabilityAndUpdates(t *testing.T) {
+	emulatorHost := os.Getenv("FIRESTORE_EMULATOR_HOST")
+	if emulatorHost == "" {
+		t.Skip("Skipping Pull Request mergeability and update tests: FIRESTORE_EMULATOR_HOST not set")
+	}
+
+	ctx := context.Background()
+	client, err := db.NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("failed to create db client: %v", err)
+	}
+	defer client.Close()
+
+	// Setup local repos root directory for the test
+	tempReposRoot, err := os.MkdirTemp("", "gitbucket-merge-repos-*")
+	if err != nil {
+		t.Fatalf("failed to create temp repos root: %v", err)
+	}
+	defer os.RemoveAll(tempReposRoot)
+
+	authHandler := auth.NewAuthHandler(true, nil, client)
+	apiHandler := NewAPIHandler(client, nil, "", tempReposRoot, authHandler, sync.NewKMSClient(nil, ""))
+
+	r := chi.NewRouter()
+	apiHandler.RegisterRoutes(r)
+
+	suffix := randSuffix()
+	uid := "merge-uid-" + suffix
+	username := "merge-user-" + suffix
+	repoName := "mergerepo-" + suffix
+
+	// Register username
+	regBody, _ := json.Marshal(map[string]string{"username": username})
+	req := httptest.NewRequest("POST", "/api/user/username", bytes.NewBuffer(regBody))
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("failed to register user in test: %d (body: %s)", rr.Code, rr.Body.String())
+	}
+
+	// Create repository metadata in Firestore
+	err = db.CreateRepositoryMetadata(ctx, client, uid, username, repoName, "Mergeability Test Repo", "public")
+	if err != nil {
+		t.Fatalf("failed to create repository metadata: %v", err)
+	}
+
+	// Build a working repo
+	workDir, err := os.MkdirTemp("", "gitbucket-work-merge-*")
+	if err != nil {
+		t.Fatalf("failed to create work dir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	runGitCmd := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = workDir
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git command failed: git %s: %v: %s", strings.Join(args, " "), err, stderr.String())
+		}
+	}
+
+	runGitCmd("init")
+	runGitCmd("config", "user.name", "Merge Tester")
+	runGitCmd("config", "user.email", "mergetester@example.com")
+
+	// 1. Initial commit on main
+	err = os.WriteFile(filepath.Join(workDir, "conflict.txt"), []byte("line 1\nline 2\n"), 0644)
+	if err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	runGitCmd("add", "conflict.txt")
+	runGitCmd("commit", "-m", "Initial commit")
+	_ = exec.Command("git", "-C", workDir, "branch", "-M", "main").Run()
+
+	// 2. Create clean branch
+	runGitCmd("checkout", "-b", "clean-branch")
+	err = os.WriteFile(filepath.Join(workDir, "clean.txt"), []byte("clean file content\n"), 0644)
+	if err != nil {
+		t.Fatalf("failed to write clean file: %v", err)
+	}
+	runGitCmd("add", "clean.txt")
+	runGitCmd("commit", "-m", "Add clean file")
+
+	// 3. Create conflicting branch
+	runGitCmd("checkout", "main")
+	runGitCmd("checkout", "-b", "conflict-branch")
+	err = os.WriteFile(filepath.Join(workDir, "conflict.txt"), []byte("line 1\nconflict content\n"), 0644)
+	if err != nil {
+		t.Fatalf("failed to write conflict file: %v", err)
+	}
+	runGitCmd("commit", "-am", "Add conflicting content")
+
+	// 4. Update main to introduce conflict
+	runGitCmd("checkout", "main")
+	err = os.WriteFile(filepath.Join(workDir, "conflict.txt"), []byte("line 1\nmain content\n"), 0644)
+	if err != nil {
+		t.Fatalf("failed to write main file: %v", err)
+	}
+	runGitCmd("commit", "-am", "Main content change")
+
+	// Clone bare repository to tempReposRoot
+	destPath := filepath.Join(tempReposRoot, strings.ToLower(username), repoName+".git")
+	err = os.MkdirAll(filepath.Dir(destPath), 0755)
+	if err != nil {
+		t.Fatalf("failed to create destination parent: %v", err)
+	}
+	cmdClone := exec.Command("git", "clone", "--bare", workDir, destPath)
+	if err := cmdClone.Run(); err != nil {
+		t.Fatalf("failed to clone bare repository: %v", err)
+	}
+
+	// Update branch metadata in Firestore
+	err = db.UpdateRepositoryMetadata(ctx, client, username, repoName, map[string]interface{}{
+		"branches": []string{"main", "clean-branch", "conflict-branch"},
+	})
+	if err != nil {
+		t.Fatalf("failed to update repository branches: %v", err)
+	}
+
+	// Create PRs
+	var cleanPrNum, conflictPrNum int
+
+	t.Run("CreateCleanPR", func(t *testing.T) {
+		prBody, _ := json.Marshal(map[string]string{
+			"title":        "Clean PR",
+			"description":  "Merge clean branch",
+			"sourceBranch": "clean-branch",
+			"targetBranch": "main",
+		})
+		req := httptest.NewRequest("POST", "/api/repos/"+username+"/"+repoName+"/pulls", bytes.NewBuffer(prBody))
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d", rr.Code)
+		}
+		var resp db.PullRequest
+		_ = json.NewDecoder(rr.Body).Decode(&resp)
+		cleanPrNum = resp.Number
+	})
+
+	t.Run("CreateConflictPR", func(t *testing.T) {
+		prBody, _ := json.Marshal(map[string]string{
+			"title":        "Conflict PR",
+			"description":  "Merge conflict branch",
+			"sourceBranch": "conflict-branch",
+			"targetBranch": "main",
+		})
+		req := httptest.NewRequest("POST", "/api/repos/"+username+"/"+repoName+"/pulls", bytes.NewBuffer(prBody))
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created, got %d", rr.Code)
+		}
+		var resp db.PullRequest
+		_ = json.NewDecoder(rr.Body).Decode(&resp)
+		conflictPrNum = resp.Number
+	})
+
+	// Test GET mergeability
+	t.Run("GetCleanPR_Mergeable", func(t *testing.T) {
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/repos/%s/%s/pulls/%d", username, repoName, cleanPrNum), nil)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+		var resp db.PullRequest
+		_ = json.NewDecoder(rr.Body).Decode(&resp)
+		if resp.Mergeable == nil {
+			t.Fatal("expected mergeable to be set, got nil")
+		}
+		if !*resp.Mergeable {
+			t.Errorf("expected mergeable to be true, got false")
+		}
+	})
+
+	t.Run("GetConflictPR_Conflicting", func(t *testing.T) {
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/repos/%s/%s/pulls/%d", username, repoName, conflictPrNum), nil)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+		var resp db.PullRequest
+		_ = json.NewDecoder(rr.Body).Decode(&resp)
+		if resp.Mergeable == nil {
+			t.Fatal("expected mergeable to be set, got nil")
+		}
+		if *resp.Mergeable {
+			t.Errorf("expected mergeable to be false, got true")
+		}
+	})
+
+	// Test Update Branch API
+	t.Run("UpdateCleanPR_Success", func(t *testing.T) {
+		updateBody, _ := json.Marshal(map[string]string{"strategy": "merge"})
+		req := httptest.NewRequest("POST", fmt.Sprintf("/api/repos/%s/%s/pulls/%d/update", username, repoName, cleanPrNum), bytes.NewBuffer(updateBody))
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d (body: %s)", rr.Code, rr.Body.String())
+		}
+
+		var resp map[string]interface{}
+		_ = json.NewDecoder(rr.Body).Decode(&resp)
+		if resp["success"] != true {
+			t.Errorf("expected success true, got %v", resp["success"])
+		}
+	})
+
+	t.Run("UpdateConflictPR_Conflict", func(t *testing.T) {
+		updateBody, _ := json.Marshal(map[string]string{"strategy": "merge"})
+		req := httptest.NewRequest("POST", fmt.Sprintf("/api/repos/%s/%s/pulls/%d/update", username, repoName, conflictPrNum), bytes.NewBuffer(updateBody))
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusConflict {
+			t.Fatalf("expected 409 Conflict, got %d (body: %s)", rr.Code, rr.Body.String())
+		}
+
+		var resp map[string]interface{}
+		_ = json.NewDecoder(rr.Body).Decode(&resp)
+		if resp["success"] == true {
+			t.Errorf("expected success false, got true")
+		}
+	})
+}
+

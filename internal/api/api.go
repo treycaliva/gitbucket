@@ -123,6 +123,7 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Post("/repos/{owner}/{repo}/pulls", h.CreatePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/merge", h.MergePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/close", h.ClosePullRequest)
+			r.Post("/repos/{owner}/{repo}/pulls/{number}/update", h.UpdatePullRequestBranch)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/reviews", h.SubmitReviewHandler)
 
 			r.Post("/repos/{owner}/{repo}/collaborators", h.AddCollaboratorHandler)
@@ -1137,6 +1138,7 @@ func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"devMode":  devMode,
 		"firebase": firebaseConfig,
+		"gitUrl":   os.Getenv("GIT_URL"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

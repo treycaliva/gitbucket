@@ -29,6 +29,18 @@ func branchExists(localRepoPath, branch string) bool {
 	return cmd.Run() == nil
 }
 
+// getBranchSHA resolves a branch name to its latest commit SHA.
+func getBranchSHA(localRepoPath, branch string) (string, error) {
+	cmd := exec.Command("git", "--git-dir", localRepoPath, "rev-parse", "refs/heads/"+branch)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 // runGit runs a git command in the specified directory.
 func runGit(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
@@ -214,7 +226,7 @@ func (h *APIHandler) GetPullRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, _, ok := h.authorizeGitRead(&w, r, owner, repo)
+	_, localRepoPath, ok := h.authorizeGitRead(&w, r, owner, repo)
 	if !ok {
 		return
 	}
@@ -227,6 +239,45 @@ func (h *APIHandler) GetPullRequest(w http.ResponseWriter, r *http.Request) {
 	if pr == nil {
 		http.Error(w, "Pull request not found", http.StatusNotFound)
 		return
+	}
+
+	if pr.Status == "open" {
+		// Sync repository first to get the latest refs from GCS
+		if h.StorageClient != nil && h.BucketName != "" {
+			_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+			if err != nil {
+				http.Error(w, "Failed to sync repository from GCS: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		sourceSha, errSource := getBranchSHA(localRepoPath, pr.SourceBranch)
+		targetSha, errTarget := getBranchSHA(localRepoPath, pr.TargetBranch)
+		if errSource == nil && errTarget == nil {
+			if pr.Mergeable == nil || pr.LastCheckedSourceSHA != sourceSha || pr.LastCheckedTargetSHA != targetSha {
+				// Recheck mergeability
+				tempDir, tempErr := os.MkdirTemp("", "gitbucket-mergecheck-")
+				if tempErr == nil {
+					defer os.RemoveAll(tempDir)
+					_, cloneErr := runGit("", "clone", localRepoPath, tempDir)
+					if cloneErr == nil {
+						_, checkoutErr := runGit(tempDir, "checkout", pr.TargetBranch)
+						if checkoutErr == nil {
+							_, _ = runGit(tempDir, "config", "user.name", "mergecheck")
+							_, _ = runGit(tempDir, "config", "user.email", "mergecheck@example.com")
+							_, mergeErr := runGit(tempDir, "merge", "--no-commit", "--no-ff", "origin/"+pr.SourceBranch)
+							
+							isMergeable := mergeErr == nil
+							pr.Mergeable = &isMergeable
+							pr.LastCheckedSourceSHA = sourceSha
+							pr.LastCheckedTargetSHA = targetSha
+							
+							_ = db.UpdatePullRequestMergeableStatus(r.Context(), h.FirestoreClient, owner, repo, number, pr.Mergeable, sourceSha, targetSha)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -630,3 +681,181 @@ func (h *APIHandler) MergePullRequest(w http.ResponseWriter, r *http.Request) {
 		"status":  "merged",
 	})
 }
+
+// UpdatePullRequestBranch handles POST /api/repos/{owner}/{repo}/pulls/{number}/update
+func (h *APIHandler) UpdatePullRequestBranch(w http.ResponseWriter, r *http.Request) {
+	owner := chi.URLParam(r, "owner")
+	repo := chi.URLParam(r, "repo")
+	numberStr := chi.URLParam(r, "number")
+
+	number, err := strconv.Atoi(numberStr)
+	if err != nil {
+		http.Error(w, "Invalid pull request number", http.StatusBadRequest)
+		return
+	}
+
+	uid := auth.GetUID(r.Context())
+	username := auth.GetUsername(r.Context())
+	if uid == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	_, localRepoPath, ok := h.authorizeGitRead(&w, r, owner, repo)
+	if !ok {
+		return
+	}
+
+	pr, err := db.GetPullRequest(r.Context(), h.FirestoreClient, owner, repo, number)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if pr == nil {
+		http.Error(w, "Pull request not found", http.StatusNotFound)
+		return
+	}
+
+	if pr.Status != "open" {
+		http.Error(w, "Pull request is not open", http.StatusBadRequest)
+		return
+	}
+
+	// Read update strategy from request body
+	var reqBody struct {
+		Strategy string `json:"strategy"` // "merge" or "rebase"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if reqBody.Strategy != "merge" && reqBody.Strategy != "rebase" {
+		http.Error(w, "Invalid strategy (must be 'merge' or 'rebase')", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Acquire Lock
+	lockToken, err := db.AcquireLock(r.Context(), h.FirestoreClient, owner, repo, 5*time.Minute, 30*time.Second)
+	if err != nil {
+		http.Error(w, "Failed to acquire repository lock: "+err.Error(), http.StatusConflict)
+		return
+	}
+	defer func() {
+		if lockToken != "" {
+			_ = db.ReleaseLock(context.Background(), h.FirestoreClient, owner, repo, lockToken)
+		}
+	}()
+
+	// Sync from GCS under the lock
+	if h.StorageClient != nil && h.BucketName != "" {
+		_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+		if err != nil {
+			http.Error(w, "Failed to sync repository from GCS: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Verify branches exist
+	if !branchExists(localRepoPath, pr.SourceBranch) {
+		http.Error(w, fmt.Sprintf("sourceBranch %q does not exist", pr.SourceBranch), http.StatusBadRequest)
+		return
+	}
+	if !branchExists(localRepoPath, pr.TargetBranch) {
+		http.Error(w, fmt.Sprintf("targetBranch %q does not exist", pr.TargetBranch), http.StatusBadRequest)
+		return
+	}
+
+	// 2. Clone using a temporary directory
+	tempDir, err := os.MkdirTemp("", "gitbucket-update-")
+	if err != nil {
+		http.Error(w, "Failed to create temporary directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Clone bare repo to temp
+	_, err = runGit("", "clone", localRepoPath, tempDir)
+	if err != nil {
+		http.Error(w, "Clone failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Checkout source branch (the branch we want to update)
+	_, err = runGit(tempDir, "checkout", pr.SourceBranch)
+	if err != nil {
+		http.Error(w, "Checkout source branch failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Configure git committer & author identity locally in the clone
+	_, _ = runGit(tempDir, "config", "user.name", username)
+	_, _ = runGit(tempDir, "config", "user.email", username+"@example.com")
+
+	if reqBody.Strategy == "merge" {
+		mergeMsg := fmt.Sprintf("Merge branch '%s' into '%s'", pr.TargetBranch, pr.SourceBranch)
+		_, err = runGit(tempDir, "merge", "--no-ff", "origin/"+pr.TargetBranch, "-m", mergeMsg)
+		if err != nil {
+			// Merge conflict!
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("Merge conflict: Could not merge '%s' into '%s' cleanly. Details: %v", pr.TargetBranch, pr.SourceBranch, err.Error()),
+			})
+			return
+		}
+	} else { // rebase
+		_, err = runGit(tempDir, "rebase", "origin/"+pr.TargetBranch)
+		if err != nil {
+			// Rebase conflict! Clean up the rebase state first
+			_, _ = runGit(tempDir, "rebase", "--abort")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"message": fmt.Sprintf("Rebase conflict: Could not rebase '%s' onto '%s' cleanly. Details: %v", pr.SourceBranch, pr.TargetBranch, err.Error()),
+			})
+			return
+		}
+	}
+
+	// Push updated source branch back to origin
+	// (We use --force if it is a rebase since rebase rewrites git history)
+	pushArgs := []string{"push", "origin", pr.SourceBranch}
+	if reqBody.Strategy == "rebase" {
+		pushArgs = append(pushArgs, "--force")
+	}
+	_, err = runGit(tempDir, pushArgs...)
+	if err != nil {
+		http.Error(w, "Failed to push updated branch: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Upload updated bare repo to GCS
+	if h.StorageClient != nil && h.BucketName != "" {
+		err = gcs.UploadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+		if err != nil {
+			http.Error(w, "Failed to upload updated repository to GCS: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// 4. Update mergeability status cache on the PR in Firestore
+	sourceSha, errSource := getBranchSHA(localRepoPath, pr.SourceBranch)
+	targetSha, errTarget := getBranchSHA(localRepoPath, pr.TargetBranch)
+	if errSource == nil && errTarget == nil {
+		isMergeable := true
+		pr.Mergeable = &isMergeable
+		pr.LastCheckedSourceSHA = sourceSha
+		pr.LastCheckedTargetSHA = targetSha
+		_ = db.UpdatePullRequestMergeableStatus(r.Context(), h.FirestoreClient, owner, repo, number, pr.Mergeable, sourceSha, targetSha)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"status":  "updated",
+	})
+}
+
