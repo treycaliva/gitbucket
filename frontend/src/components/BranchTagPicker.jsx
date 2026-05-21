@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { GitBranch, Check, X } from 'lucide-react';
-import apiClient from '../apiClient';
+import { apiClient } from '../apiClient';
 
 export default function BranchTagPicker({
   owner,

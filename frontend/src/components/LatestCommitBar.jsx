@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { History } from 'lucide-react';
-import apiClient from '../apiClient';
+import { apiClient } from '../apiClient';
 import { formatRelative } from '../utils/relativeTime';
 import { initials, colorFor } from '../utils/avatarColor';
 
