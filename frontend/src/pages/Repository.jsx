@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../apiClient';
 import BranchProtectionModal from '../components/BranchProtectionModal';
+import BranchTagPicker from '../components/BranchTagPicker';
+import LatestCommitBar from '../components/LatestCommitBar';
 import {
   Folder,
   FileCode,
@@ -588,71 +590,47 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 gap: '1rem'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '0.5rem',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid var(--border-color)',
-                    padding: '0.4rem 0.8rem',
-                    borderRadius: '6px',
-                    fontSize: '0.9rem'
-                  }}>
-                    <GitBranch size={16} style={{ color: '#38bdf8' }} />
-                    <select
-                      value={currentBranch}
-                      onChange={(e) => {
-                        setCurrentBranch(e.target.value);
-                        setViewingFile(null);
-                        setFileContent('');
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#f8fafc',
-                        fontFamily: 'inherit',
-                        fontWeight: 600,
-                        fontSize: '0.9rem',
-                        outline: 'none',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {meta.branches && meta.branches.map(b => (
-                        <option key={b} value={b} style={{ background: '#0f172a' }}>{b}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <BranchTagPicker
+                    owner={owner}
+                    repo={repo}
+                    branches={meta.branches || []}
+                    defaultBranch={meta.defaultBranch || 'main'}
+                    currentBranch={currentBranch}
+                    onChange={(ref) => {
+                      setCurrentBranch(ref);
+                      setViewingFile(null);
+                      setFileContent('');
+                    }}
+                  />
 
-                  {/* Breadcrumbs */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
-                    <span 
-                      style={{ color: '#38bdf8', fontWeight: 600, cursor: 'pointer' }}
-                      onClick={() => handleBreadcrumbClick(-1)}
-                    >
-                      {repo}
-                    </span>
-                    {currentPath.split('/').filter(Boolean).map((part, i) => (
-                      <React.Fragment key={i}>
-                        <span style={{ color: '#64748b' }}>/</span>
-                        <span 
-                          style={{ 
-                            color: i === currentPath.split('/').filter(Boolean).length - 1 && !viewingFile ? '#f8fafc' : '#38bdf8', 
-                            fontWeight: i === currentPath.split('/').filter(Boolean).length - 1 && !viewingFile ? 600 : 400,
-                            cursor: 'pointer' 
-                          }}
-                          onClick={() => handleBreadcrumbClick(i)}
-                        >
-                          {part}
-                        </span>
-                      </React.Fragment>
-                    ))}
-                    {viewingFile && (
-                      <>
-                        <span style={{ color: '#64748b' }}>/</span>
-                        <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
-                      </>
-                    )}
-                  </div>
+                  {(currentPath || viewingFile) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
+                      {currentPath.split('/').filter(Boolean).map((part, i, arr) => {
+                        const isLast = i === arr.length - 1 && !viewingFile;
+                        return (
+                          <React.Fragment key={i}>
+                            {i > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                            <span
+                              style={{
+                                color: isLast ? '#f8fafc' : '#38bdf8',
+                                fontWeight: isLast ? 600 : 400,
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => handleBreadcrumbClick(i)}
+                            >
+                              {part}
+                            </span>
+                          </React.Fragment>
+                        );
+                      })}
+                      {viewingFile && (
+                        <>
+                          {currentPath.split('/').filter(Boolean).length > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                          <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
                 
                 {viewingFile && (
@@ -681,6 +659,14 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
               ) : (
                 /* B. If viewing a Folder (Tree) */
                 <div>
+                  {currentBranch && (
+                    <LatestCommitBar
+                      owner={owner}
+                      repo={repo}
+                      branch={currentBranch}
+                      onViewCommits={() => onNavigate('repository', { owner, repo, tab: 'commits' })}
+                    />
+                  )}
                   <div className="file-list">
                     <div className="file-header">
                       <span>Files</span>
