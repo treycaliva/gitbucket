@@ -18,11 +18,22 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gitbucket/internal/apps"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
 	gitpkg "gitbucket/internal/git"
 )
+
+// defaultZeroSHA returns s unchanged, or the all-zeros SHA-1 string when s is
+// empty. Used when building PushPayload Before/After fields for ref creations
+// and deletions where no prior/new SHA exists.
+func defaultZeroSHA(s string) string {
+	if s == "" {
+		return "0000000000000000000000000000000000000000"
+	}
+	return s
+}
 
 // getUpdatedAtMs extracts millisecond timestamp from repo metadata
 func getUpdatedAtMs(meta map[string]interface{}) int64 {
@@ -412,6 +423,40 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// Plan 3: fan out push events to subscribed Apps.
+		pushSender := authenticatedUser
+		if pushSender == "" {
+			pushSender = "unknown"
+		}
+		for ref, newSHA := range postRefs {
+			oldSHA := preRefs[ref]
+			if oldSHA == newSHA {
+				continue
+			}
+			apps.Fire(r.Context(), h.Events, apps.PushPayload{
+				Ref:        ref,
+				Before:     defaultZeroSHA(oldSHA),
+				After:      defaultZeroSHA(newSHA),
+				OwnerLogin: owner,
+				RepoName:   repo,
+				Sender:     apps.SenderRef{Login: pushSender, Type: "User"},
+			})
+		}
+		// Fan out delete events for refs that no longer exist after the push.
+		for ref, oldSHA := range preRefs {
+			if _, exists := postRefs[ref]; exists {
+				continue
+			}
+			apps.Fire(r.Context(), h.Events, apps.PushPayload{
+				Ref:        ref,
+				Before:     oldSHA,
+				After:      "0000000000000000000000000000000000000000",
+				OwnerLogin: owner,
+				RepoName:   repo,
+				Sender:     apps.SenderRef{Login: pushSender, Type: "User"},
+			})
+		}
+
 		log.Printf("[Git HTTP] GCS sync and Firestore metadata update complete!")
 	}
 }
