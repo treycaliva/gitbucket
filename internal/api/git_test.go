@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -252,6 +255,78 @@ func TestGitAndRepositoryAPIs(t *testing.T) {
 	r.ServeHTTP(rrGitPrivRefsOidc, reqGitPrivRefsOidc)
 	if rrGitPrivRefsOidc.Code != http.StatusOK {
 		t.Errorf("expected 200 OK for GCB runner OIDC git clone, got %d (body: %s)", rrGitPrivRefsOidc.Code, rrGitPrivRefsOidc.Body.String())
+	}
+
+	// 6g. Seed the bare repo with 3 commits so pagination can be tested.
+	bareRepoPath := filepath.Join(tempReposRoot, strings.ToLower(username), fmt.Sprintf("pubrepo-%s.git", suffix))
+	// Create a non-bare work repo, make commits, then push to the bare repo.
+	workDir, err := os.MkdirTemp("", "gitbucket-work-*")
+	if err != nil {
+		t.Fatalf("failed to create work dir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+	runCmd := func(dir string, args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		out, cmdErr := cmd.CombinedOutput()
+		if cmdErr != nil {
+			t.Fatalf("command %v failed: %v\noutput: %s", args, cmdErr, out)
+		}
+	}
+	runCmd(workDir, "git", "init", "-b", "main", workDir)
+	runCmd(workDir, "git", "config", "user.email", "test@example.com")
+	runCmd(workDir, "git", "config", "user.name", "Test User")
+	for i := 1; i <= 3; i++ {
+		fpath := filepath.Join(workDir, fmt.Sprintf("file%d.txt", i))
+		if writeErr := os.WriteFile(fpath, []byte(fmt.Sprintf("commit %d\n", i)), 0644); writeErr != nil {
+			t.Fatalf("failed to write file: %v", writeErr)
+		}
+		runCmd(workDir, "git", "add", ".")
+		runCmd(workDir, "git", "commit", "-m", fmt.Sprintf("commit number %d", i))
+	}
+	runCmd(workDir, "git", "remote", "add", "origin", bareRepoPath)
+	runCmd(workDir, "git", "push", "origin", "main")
+
+	// --- commits pagination ---
+	{
+		// Fetch first page of 2
+		req := httptest.NewRequest("GET", "/api/repos/"+username+"/pubrepo-"+suffix+"/commits/main?limit=2&offset=0", nil)
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("commits page 0 status: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var page0 []map[string]any
+		json.NewDecoder(rr.Body).Decode(&page0)
+		if len(page0) != 2 {
+			t.Fatalf("expected 2 commits on page 0, got %d", len(page0))
+		}
+
+		// Fetch page 1 (offset 2)
+		req2 := httptest.NewRequest("GET", "/api/repos/"+username+"/pubrepo-"+suffix+"/commits/main?limit=2&offset=2", nil)
+		req2.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr2 := httptest.NewRecorder()
+		r.ServeHTTP(rr2, req2)
+		if rr2.Code != http.StatusOK {
+			t.Fatalf("commits page 1 status: %d body=%s", rr2.Code, rr2.Body.String())
+		}
+		var page1 []map[string]any
+		json.NewDecoder(rr2.Body).Decode(&page1)
+		if len(page1) > 0 && page0[1]["sha"] == page1[0]["sha"] {
+			t.Fatalf("expected page 1 to start after page 0; got duplicate sha %v", page1[0]["sha"])
+		}
+		// With 3 commits and limit=2, offset=2 should return exactly 1 commit.
+		// If offset is ignored the handler returns limit=2 commits again (same page0).
+		if len(page1) != 1 {
+			t.Fatalf("expected exactly 1 commit on page 1 (offset=2, limit=2 from 3 total), got %d", len(page1))
+		}
+		// Ensure pages don't overlap: page1[0] must not appear in page0.
+		for _, c := range page0 {
+			if c["sha"] == page1[0]["sha"] {
+				t.Fatalf("offset not applied: sha %v appears in both page 0 and page 1", page1[0]["sha"])
+			}
+		}
 	}
 
 	// 7. Delete repository
