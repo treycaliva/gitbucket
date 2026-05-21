@@ -352,6 +352,28 @@ func TestGitAndRepositoryAPIs(t *testing.T) {
 		}
 	}
 
+	// --- branch head ---
+	{
+		req := httptest.NewRequest("GET", "/api/repos/"+username+"/pubrepo-"+suffix+"/refs/main/head", nil)
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("head status: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var head map[string]any
+		json.NewDecoder(rr.Body).Decode(&head)
+		if head["sha"] == "" || head["sha"] == nil {
+			t.Fatalf("expected non-empty sha, got %+v", head)
+		}
+		if tc, ok := head["totalCommits"].(float64); !ok || tc < 1 {
+			t.Fatalf("expected totalCommits >= 1, got %+v (%T)", head["totalCommits"], head["totalCommits"])
+		}
+		if head["authorName"] == "" {
+			t.Fatalf("expected authorName, got empty")
+		}
+	}
+
 	// 7. Delete repository
 	reqDelRepo := httptest.NewRequest("DELETE", "/api/repos/"+username+"/pubrepo-"+suffix, nil)
 	reqDelRepo.Header.Set("Authorization", "Bearer mock_"+uid)

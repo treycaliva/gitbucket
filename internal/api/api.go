@@ -87,6 +87,7 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/blob/{branch}/*", h.GetBlob)
 			r.Get("/repos/{owner}/{repo}/codeowners", h.CodeOwnersHandler)
 			r.Get("/repos/{owner}/{repo}/tags", h.ListTags)
+			r.Get("/repos/{owner}/{repo}/refs/{branch}/head", h.GetBranchHead)
 
 			r.Get("/repos/{owner}/{repo}/pulls", h.ListPullRequests)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPullRequest)
