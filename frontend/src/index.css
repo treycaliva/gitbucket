@@ -489,20 +489,18 @@ select.text-input {
   display: flex;
   border-bottom: 1px solid var(--border-color);
   margin-bottom: 1.5rem;
-  gap: 0.35rem;
+  gap: 1.5rem;
 }
 .tab {
   background: transparent;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-top-left-radius: 8px;
-  border-top-right-radius: 8px;
-  padding: 0.65rem 1.25rem;
-  font-weight: 600;
-  font-size: 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.75rem 0.25rem;
+  font-weight: 500;
+  font-size: 0.95rem;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.15s ease;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -511,14 +509,10 @@ select.text-input {
 }
 .tab:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.03);
 }
 .tab.active {
-  color: var(--text-primary);
-  background: rgba(30, 41, 59, 0.4); /* slate/navy glassmorphism background */
-  border-color: var(--border-color);
-  border-bottom: 1px solid var(--bg-app); /* integrates with the content area background */
-  box-shadow: inset 0 2px 0 0 var(--accent); /* top highlight line */
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
 }
 
 /* Page Headers */
@@ -1032,76 +1026,112 @@ select.text-input {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  transition: all 0.15s ease;
 }
 
-.diff-file-card-action-btn:hover {
+.diff-card-header.viewed {
+  border-bottom-color: transparent;
+  background: rgba(15, 23, 42, 0.15);
+}
+
+.diff-file-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.diff-file-path {
+  font-family: var(--font-sans);
+  font-weight: 500;
   color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.diff-file-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   background: rgba(255, 255, 255, 0.03);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
 }
 
-.diff-file-card-body {
+.diff-file-additions {
+  color: var(--text-success);
+}
+
+.diff-file-deletions {
+  color: var(--text-danger);
+}
+
+.diff-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.diff-card-body {
   overflow-x: auto;
-  background: rgba(5, 7, 12, 0.75);
+  background: #090d16;
 }
 
-.diff-line-row {
-  display: grid;
-  grid-template-columns: 45px 45px 1fr;
+/* Diff Table Presentation */
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
   font-family: var(--font-mono);
   font-size: 0.825rem;
-  line-height: 1.6;
+  line-height: 1.4;
+}
+
+.diff-row {
+  display: table-row;
 }
 
 .diff-line-gutter {
-  color: var(--text-muted);
+  display: table-cell;
+  width: 45px;
+  min-width: 45px;
   text-align: right;
   padding-right: 0.75rem;
+  color: rgba(255, 255, 255, 0.2);
   user-select: none;
+  background: rgba(15, 23, 42, 0.2);
   border-right: 1px solid rgba(255, 255, 255, 0.03);
-}
-
-.diff-line-gutter-old {
-  background: transparent;
-}
-
-.diff-line-gutter-new {
-  background: transparent;
+  vertical-align: top;
 }
 
 .diff-line-code {
-  padding-left: 0.75rem;
+  display: table-cell;
+  padding: 0.15rem 1rem;
   white-space: pre-wrap;
   word-break: break-all;
-  color: var(--text-primary);
+  color: #e2e8f0;
+  vertical-align: top;
 }
 
-/* Line-specific background and text color highlights */
-.diff-row-normal {
-  background: transparent;
+/* Add/Delete Styling rules */
+.diff-row-addition {
+  background: rgba(16, 185, 129, 0.05);
 }
-
-.diff-row-add {
-  background: rgba(16, 185, 129, 0.06);
-}
-.diff-row-add .diff-line-code {
+.diff-row-addition .diff-line-code {
   color: #34d399;
 }
-.diff-row-add .diff-line-gutter {
+.diff-row-addition .diff-line-gutter {
   background: rgba(16, 185, 129, 0.08);
-  color: rgba(52, 211, 153, 0.6);
+  color: rgba(52, 211, 153, 0.4);
 }
 
-.diff-row-del {
-  background: rgba(244, 63, 94, 0.06);
+.diff-row-deletion {
+  background: rgba(239, 68, 68, 0.06);
 }
-.diff-row-del .diff-line-code {
-  color: #fb7185;
+.diff-row-deletion .diff-line-code {
+  color: #f87171;
 }
-.diff-row-del .diff-line-gutter {
-  background: rgba(244, 63, 94, 0.08);
-  color: rgba(251, 113, 133, 0.6);
+.diff-row-deletion .diff-line-gutter {
+  background: rgba(239, 68, 68, 0.09);
+  color: rgba(248, 113, 113, 0.4);
 }
 
 .diff-row-hunk {
@@ -1151,3 +1181,38 @@ select.text-input {
   }
 }
 
+/* Premium UI Form Element Enhancements */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.2s ease;
+}
+.btn-ghost:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.btn-ghost:active {
+  transform: scale(0.97);
+}
+
+option {
+  background-color: #0f172a;
+  color: var(--text-primary);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  width: 1.1rem;
+  height: 1.1rem;
+}

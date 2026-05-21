@@ -508,6 +508,7 @@ func (h *APIHandler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 
 	meta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("[UpdateRepository] GetRepositoryMetadata(%s/%s) failed: %v", owner, repo, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -549,8 +550,14 @@ func (h *APIHandler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(updates) > 0 {
+		updateKeys := make([]string, 0, len(updates))
+		for k := range updates {
+			updateKeys = append(updateKeys, k)
+		}
+		log.Printf("[UpdateRepository] updating %s/%s with keys=%v", owner, repo, updateKeys)
 		err = db.UpdateRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo, updates)
 		if err != nil {
+			log.Printf("[UpdateRepository] UpdateRepositoryMetadata(%s/%s) failed: %v", owner, repo, err)
 			http.Error(w, fmt.Sprintf("Failed to update repository settings: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -559,6 +566,7 @@ func (h *APIHandler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 	// Fetch updated metadata and return it
 	updatedMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("[UpdateRepository] GetRepositoryMetadata(%s/%s) after-update failed: %v", owner, repo, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -797,7 +805,19 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cmd := exec.Command("git", "--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit), `--format=%H|%an|%ae|%ad|%s`, branch)
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	args := []string{"--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit)}
+	if offset > 0 {
+		args = append(args, "--skip", strconv.Itoa(offset))
+	}
+	args = append(args, `--format=%H|%an|%ae|%ad|%s`, branch)
+	cmd := exec.Command("git", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

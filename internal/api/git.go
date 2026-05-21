@@ -131,6 +131,7 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 	// 1. Fetch Repository Metadata
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("git: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -143,13 +144,32 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 	var authenticatedUser string
 	var authenticatedUID string
 
-	username, pat, ok := r.BasicAuth()
-	if ok {
-		verifiedUID, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
-		if err == nil {
-			if strings.EqualFold(verifiedUsername, username) {
-				authenticatedUser = verifiedUsername
-				authenticatedUID = verifiedUID
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		if os.Getenv("DEV_MODE") == "true" && tokenStr == "mock_gcb_token" {
+			authenticatedUID = "gcb-runner"
+			authenticatedUser = "gcb-runner"
+		} else {
+			gitbucketURL := getGitbucketURL(r)
+			audience := fmt.Sprintf("%s/repos/%s/%s", gitbucketURL, owner, repo)
+			payload, err := VerifyCloudBuildOIDCToken(r.Context(), tokenStr, audience)
+			if err == nil && payload != nil {
+				authenticatedUID = "gcb-runner"
+				authenticatedUser = "gcb-runner"
+			} else {
+				log.Printf("[Git HTTP] OIDC token verification failed: %v", err)
+			}
+		}
+	} else {
+		username, pat, ok := r.BasicAuth()
+		if ok {
+			verifiedUID, verifiedUsername, err := db.VerifyPAT(r.Context(), h.FirestoreClient, pat)
+			if err == nil {
+				if strings.EqualFold(verifiedUsername, username) {
+					authenticatedUser = verifiedUsername
+					authenticatedUID = verifiedUID
+				}
 			}
 		}
 	}
@@ -162,7 +182,7 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		if !auth.CanRead(meta, authenticatedUID) {
+		if authenticatedUID != "gcb-runner" && !auth.CanRead(meta, authenticatedUID) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="GitBucket"`)
 			http.Error(w, "Unauthorized: read access required.", http.StatusUnauthorized)
 			return
@@ -321,6 +341,21 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 					for ref, why := range res.Reasons {
 						log.Printf("[Git HTTP] REJECTED ref=%s reason=%s", ref, why)
 					}
+					// Rollback refs locally so the local bare repo matches pre-push state.
+					for ref, oldSha := range preRefs {
+						cmd := exec.Command("git", "--git-dir", localRepoPath, "update-ref", ref, oldSha)
+						if rollbackErr := cmd.Run(); rollbackErr != nil {
+							log.Printf("[Git HTTP] Failed to rollback ref %s to %s: %v", ref, oldSha, rollbackErr)
+						}
+					}
+					for ref := range postRefs {
+						if _, existed := preRefs[ref]; !existed {
+							cmd := exec.Command("git", "--git-dir", localRepoPath, "update-ref", "-d", ref)
+							if rollbackErr := cmd.Run(); rollbackErr != nil {
+								log.Printf("[Git HTTP] Failed to delete rejected new ref %s: %v", ref, rollbackErr)
+							}
+						}
+					}
 					_ = os.Remove(filepath.Join(localRepoPath, "last_sync_timestamp"))
 					return
 				}
@@ -346,6 +381,36 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 		updatedMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 		if err == nil && updatedMeta != nil {
 			_ = writeLocalSyncTimestamp(localRepoPath, getUpdatedAtMs(updatedMeta))
+			
+			// Trigger GitHub Sync if configured
+			if ghSyncVal, ok := updatedMeta["githubSync"]; ok {
+				if ghSync, ok := ghSyncVal.(map[string]interface{}); ok {
+					enabled, _ := ghSync["enabled"].(bool)
+					direction, _ := ghSync["direction"].(string)
+					if enabled && (direction == "mirror-to-github" || direction == "bidirectional") {
+						h.TriggerSyncTask(owner, repo, direction, false, "")
+					}
+				}
+			}
+
+			// Trigger Cloud Build if cloudbuild.yaml exists in any updated branch refs
+			if len(updates) > 0 {
+				for _, u := range updates {
+					if u.IsDelete {
+						continue
+					}
+					branch := strings.TrimPrefix(u.RefName, "refs/heads/")
+					if branch == u.RefName {
+						continue // not refs/heads/
+					}
+					// Check if cloudbuild.yaml exists in the new commit
+					checkCmd := exec.Command("git", "--git-dir", localRepoPath, "cat-file", "-e", fmt.Sprintf("%s:cloudbuild.yaml", u.NewSha))
+					if err := checkCmd.Run(); err == nil {
+						log.Printf("[Git HTTP] cloudbuild.yaml detected in commit %s (branch %s). Dispatching Cloud Build...", u.NewSha, branch)
+						go h.TriggerCloudBuild(owner, repo, branch, u.NewSha)
+					}
+				}
+			}
 		}
 		log.Printf("[Git HTTP] GCS sync and Firestore metadata update complete!")
 	}
@@ -487,6 +552,11 @@ func (h *APIHandler) HandleLFSBatch(w http.ResponseWriter, r *http.Request) {
 				if attrsErr == nil {
 					exists = true
 				}
+			} else {
+				localPath := filepath.Join(h.LocalReposRoot, strings.ToLower(owner), strings.ToLower(repo), "lfs", obj.Oid)
+				if _, err := os.Stat(localPath); err == nil {
+					exists = true
+				}
 			}
 			log.Printf("[LFS Batch Download] Path check: bucket=%s path=%s exists=%v err=%v", h.BucketName, gcsPath, exists, attrsErr)
 			if exists {
@@ -526,6 +596,7 @@ func (h *APIHandler) HandleLFSUpload(w http.ResponseWriter, r *http.Request) {
 	// 1. Fetch metadata and check ownership
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("git: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -554,7 +625,24 @@ func (h *APIHandler) HandleLFSUpload(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Stream request body to GCS
 	if h.StorageClient == nil || h.BucketName == "" {
-		http.Error(w, "GCS storage is not configured", http.StatusInternalServerError)
+		localLFSDir := filepath.Join(h.LocalReposRoot, strings.ToLower(owner), strings.ToLower(repo), "lfs")
+		if err := os.MkdirAll(localLFSDir, 0755); err != nil {
+			http.Error(w, "Failed to create local LFS directory: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		localPath := filepath.Join(localLFSDir, oid)
+		f, err := os.Create(localPath)
+		if err != nil {
+			http.Error(w, "Failed to create local LFS file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		if _, err := io.Copy(f, r.Body); err != nil {
+			http.Error(w, "Failed to write local LFS file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("[LFS Upload] Local disk success: path=%s", localPath)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -595,6 +683,7 @@ func (h *APIHandler) HandleLFSDownload(w http.ResponseWriter, r *http.Request) {
 	// 1. Fetch metadata and check permissions
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("git: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -623,7 +712,24 @@ func (h *APIHandler) HandleLFSDownload(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Stream object from GCS to client
 	if h.StorageClient == nil || h.BucketName == "" {
-		http.Error(w, "GCS storage is not configured", http.StatusInternalServerError)
+		localPath := filepath.Join(h.LocalReposRoot, strings.ToLower(owner), strings.ToLower(repo), "lfs", oid)
+		info, err := os.Stat(localPath)
+		if err != nil {
+			http.Error(w, "Object not found locally: "+err.Error(), http.StatusNotFound)
+			return
+		}
+		f, err := os.Open(localPath)
+		if err != nil {
+			http.Error(w, "Failed to open local LFS file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		w.WriteHeader(http.StatusOK)
+		if _, err := io.Copy(w, f); err != nil {
+			log.Printf("Failed to copy local object content: %v", err)
+		}
 		return
 	}
 

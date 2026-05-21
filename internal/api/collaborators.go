@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -22,6 +23,7 @@ func (h *APIHandler) ListCollaboratorsHandler(w http.ResponseWriter, r *http.Req
 
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("collaborators: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -63,6 +65,7 @@ func (h *APIHandler) AddCollaboratorHandler(w http.ResponseWriter, r *http.Reque
 
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("collaborators: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -119,6 +122,7 @@ func (h *APIHandler) RemoveCollaboratorHandler(w http.ResponseWriter, r *http.Re
 
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("collaborators: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
