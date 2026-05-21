@@ -1,0 +1,55 @@
+{
+  "id": 888797655849973925,
+  "node_id": "UHVsbFJlcXVlc3Q6ODg4Nzk3NjU1ODQ5OTczOTI1",
+  "number": 1,
+  "state": "open",
+  "title": "Add feature X",
+  "body": "This adds feature X.",
+  "url": "https://gitbucket.example.com/api/v3/repos/alice/demo/pulls/1",
+  "html_url": "https://gitbucket.example.com/alice/demo/pulls/1",
+  "diff_url": "https://gitbucket.example.com/alice/demo/pulls/1.diff",
+  "user": {
+    "login": "alice",
+    "id": 6538414913668952369,
+    "node_id": "VXNlcjo2NTM4NDE0OTEzNjY4OTUyMzY5",
+    "avatar_url": "https://gitbucket.example.com/avatars/alice",
+    "html_url": "https://gitbucket.example.com/alice",
+    "url": "https://gitbucket.example.com/api/v3/users/alice",
+    "type": "User",
+    "site_admin": false
+  },
+  "head": {
+    "label": "alice:feature",
+    "ref": "feature",
+    "sha": "",
+    "user": {
+      "login": "alice",
+      "id": 6538414913668952369,
+      "node_id": "VXNlcjo2NTM4NDE0OTEzNjY4OTUyMzY5",
+      "avatar_url": "https://gitbucket.example.com/avatars/alice",
+      "html_url": "https://gitbucket.example.com/alice",
+      "url": "https://gitbucket.example.com/api/v3/users/alice",
+      "type": "User",
+      "site_admin": false
+    }
+  },
+  "base": {
+    "label": "alice:main",
+    "ref": "main",
+    "sha": "",
+    "user": {
+      "login": "alice",
+      "id": 6538414913668952369,
+      "node_id": "VXNlcjo2NTM4NDE0OTEzNjY4OTUyMzY5",
+      "avatar_url": "https://gitbucket.example.com/avatars/alice",
+      "html_url": "https://gitbucket.example.com/alice",
+      "url": "https://gitbucket.example.com/api/v3/users/alice",
+      "type": "User",
+      "site_admin": false
+    }
+  },
+  "created_at": "2026-01-15T09:30:00Z",
+  "updated_at": "2026-01-15T09:30:00Z",
+  "merged": false,
+  "draft": false
+}
