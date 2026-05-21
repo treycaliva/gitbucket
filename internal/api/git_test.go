@@ -329,6 +329,29 @@ func TestGitAndRepositoryAPIs(t *testing.T) {
 		}
 	}
 
+	// Create and push a tag so that the tags endpoint can be tested.
+	runCmd(workDir, "git", "tag", "v0.0.1")
+	runCmd(workDir, "git", "push", "origin", "v0.0.1")
+
+	// --- list tags ---
+	{
+		req := httptest.NewRequest("GET", "/api/repos/"+username+"/pubrepo-"+suffix+"/tags", nil)
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("tags status: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var tags []map[string]string
+		json.NewDecoder(rr.Body).Decode(&tags)
+		if len(tags) == 0 || tags[0]["name"] != "v0.0.1" {
+			t.Fatalf("expected v0.0.1 in tags, got %+v", tags)
+		}
+		if tags[0]["sha"] == "" {
+			t.Fatalf("expected sha on tag, got empty")
+		}
+	}
+
 	// 7. Delete repository
 	reqDelRepo := httptest.NewRequest("DELETE", "/api/repos/"+username+"/pubrepo-"+suffix, nil)
 	reqDelRepo.Header.Set("Authorization", "Bearer mock_"+uid)

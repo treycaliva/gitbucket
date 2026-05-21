@@ -674,6 +674,56 @@ func (h *APIHandler) HandleLFSUpload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// TagInfo is a single tag with its target commit SHA.
+type TagInfo struct {
+	Name string `json:"name"`
+	SHA  string `json:"sha"`
+}
+
+// ListTags handles GET /api/repos/{owner}/{repo}/tags
+func (h *APIHandler) ListTags(w http.ResponseWriter, r *http.Request) {
+	owner := chi.URLParam(r, "owner")
+	repo := chi.URLParam(r, "repo")
+
+	_, localRepoPath, ok := h.authorizeGitRead(&w, r, owner, repo)
+	if !ok {
+		return
+	}
+
+	cmd := exec.Command("git", "--git-dir", localRepoPath, "for-each-ref",
+		"--sort=-creatordate",
+		"--format=%(refname:short)|%(objectname)",
+		"refs/tags")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errStr := stderr.String()
+		if strings.Contains(errStr, "does not have any commits") || strings.Contains(errStr, "fatal: bad default revision") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		http.Error(w, "Git error: "+errStr, http.StatusInternalServerError)
+		return
+	}
+
+	tags := []TagInfo{}
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		tags = append(tags, TagInfo{Name: parts[0], SHA: parts[1]})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(tags)
+}
+
 func (h *APIHandler) HandleLFSDownload(w http.ResponseWriter, r *http.Request) {
 	owner := chi.URLParam(r, "owner")
 	repoParam := chi.URLParam(r, "repo")
