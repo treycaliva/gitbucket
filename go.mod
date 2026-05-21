@@ -13,6 +13,7 @@ require (
 	firebase.google.com/go/v4 v4.20.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/go-chi/chi/v5 v5.2.5
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/gorilla/websocket v1.5.3
 	google.golang.org/api v0.280.0
 	google.golang.org/genproto v0.0.0-20260511170946-3700d4141b60
@@ -39,7 +40,6 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
