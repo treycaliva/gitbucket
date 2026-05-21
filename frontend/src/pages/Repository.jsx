@@ -221,25 +221,30 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
     }
   };
 
+  const loadMetadata = async () => {
+    try {
+      setLoading(true);
+      const data = await apiClient.get(`/api/repos/${owner}/${repo}`);
+      setMeta(data);
+      
+      // Use default branch from metadata, fallback to main
+      const defaultBranch = data.defaultBranch || 'main';
+      setCurrentBranch(prev => {
+        if (!prev || !data.branches || !data.branches.includes(prev)) {
+          return defaultBranch;
+        }
+        return prev;
+      });
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Failed to load repository details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 1. Load Repository Metadata
   useEffect(() => {
-    const loadMetadata = async () => {
-      try {
-        setLoading(true);
-        const data = await apiClient.get(`/api/repos/${owner}/${repo}`);
-        setMeta(data);
-        
-        // Use default branch from metadata, fallback to main
-        const defaultBranch = data.defaultBranch || 'main';
-        setCurrentBranch(defaultBranch);
-      } catch (err) {
-        console.error(err);
-        setError(err.message || 'Failed to load repository details.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     Promise.resolve().then(() => {
       loadMetadata();
     });
@@ -746,9 +751,24 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                   </div>
 
                   {/* Quickstart for empty repo (owner only) */}
-                  {isOwner && commits.length === 0 && (
+                  {isOwner && treeItems.length === 0 && !currentPath && (
                     <div style={{ marginTop: '1.5rem' }}>
                       <QuickstartCard cloneUrl={cloneUrl} username={user.username} />
+                    </div>
+                  )}
+
+                  {/* Suggest adding a README when the repo has files but none at root */}
+                  {isOwner && treeItems.length > 0 && !currentPath && !readmeContent && (
+                    <div className="glass-card" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+                      <FileText size={20} style={{ color: '#a78bfa', flexShrink: 0, marginTop: '0.15rem' }} />
+                      <div>
+                        <div style={{ fontWeight: 600, color: '#f8fafc', marginBottom: '0.35rem' }}>
+                          Help people understand your project
+                        </div>
+                        <div style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                          Add a <code style={{ fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>README.md</code> to the root of this repository to describe what it does, how to use it, and how to contribute.
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -786,7 +806,50 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                     onClick={() => onNavigate('commit', { owner, repo, sha: commit.sha })}
                   >
                     <div style={{ flex: 1 }}>
-                      <div className="commit-message">{commit.message}</div>
+                      <div className="commit-message" style={{ display: 'flex', alignItems: 'center' }}>
+                        {commit.message}
+                        {commit.overallStatus && (
+                          <span 
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              fontSize: '0.7rem',
+                              padding: '0.1rem 0.4rem',
+                              borderRadius: '9999px',
+                              background: commit.overallStatus === 'SUCCESS' ? 'rgba(16, 185, 129, 0.1)' : 
+                                          (commit.overallStatus === 'FAILURE' || commit.overallStatus === 'TIMEOUT' || commit.overallStatus === 'CANCELLED') ? 'rgba(239, 68, 68, 0.1)' : 
+                                          'rgba(59, 130, 246, 0.1)',
+                              color: commit.overallStatus === 'SUCCESS' ? '#10b981' : 
+                                     (commit.overallStatus === 'FAILURE' || commit.overallStatus === 'TIMEOUT' || commit.overallStatus === 'CANCELLED') ? '#ef4444' : 
+                                     '#3b82f6',
+                              border: `1px solid ${commit.overallStatus === 'SUCCESS' ? 'rgba(16, 185, 129, 0.2)' : 
+                                                    (commit.overallStatus === 'FAILURE' || commit.overallStatus === 'TIMEOUT' || commit.overallStatus === 'CANCELLED') ? 'rgba(239, 68, 68, 0.2)' : 
+                                                    'rgba(59, 130, 246, 0.2)'}`,
+                              marginLeft: '0.75rem',
+                              cursor: 'pointer'
+                            }}
+                            title={`Status: ${commit.overallStatus}. Click to view build logs.`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (commit.statuses && commit.statuses.length > 0) {
+                                const buildId = commit.statuses[0].buildId;
+                                onNavigate('build_logs', { owner, repo, sha: commit.sha, buildId });
+                              }
+                            }}
+                          >
+                            <span style={{ 
+                              width: '6px', 
+                              height: '6px', 
+                              borderRadius: '50%', 
+                              background: commit.overallStatus === 'SUCCESS' ? '#10b981' : 
+                                          (commit.overallStatus === 'FAILURE' || commit.overallStatus === 'TIMEOUT' || commit.overallStatus === 'CANCELLED') ? '#ef4444' : 
+                                          '#3b82f6' 
+                            }}></span>
+                            {commit.overallStatus.toLowerCase()}
+                          </span>
+                        )}
+                      </div>
                       <div className="commit-meta">
                         <span style={{ color: '#f8fafc', fontWeight: 600 }}>{commit.authorName}</span>
                         <span>committed on {new Date(commit.date).toLocaleDateString()}</span>
@@ -816,7 +879,7 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                     onChange={(e) => setNewCollabUsername(e.target.value)}
                     style={{ flex: 1 }}
                   />
-                  <button className="btn" onClick={addCollaborator} disabled={!newCollabUsername.trim()}>Add</button>
+                  <button className="btn btn-secondary" onClick={addCollaborator} disabled={!newCollabUsername.trim()}>Add</button>
                 </div>
                 {collaboratorError && <div style={{ color: '#ef4444', marginBottom: '0.5rem' }}>{collaboratorError}</div>}
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -1001,6 +1064,74 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 >
                   {savingSettings ? 'Saving...' : 'Save Settings'}
                 </button>
+              </div>
+
+              {/* Manage Branches */}
+              <div className="glass-card">
+                <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Manage Branches</h3>
+                <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+                  Manage the branches in this repository. The default branch cannot be deleted.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {meta && meta.branches && meta.branches.map(branchName => {
+                    const isDefault = branchName === (meta.defaultBranch || 'main');
+                    return (
+                      <div 
+                        key={branchName}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '0.75rem 1rem',
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#f8fafc' }}>
+                            {branchName}
+                          </span>
+                          {isDefault && (
+                            <span style={{
+                              fontSize: '0.7rem',
+                              background: 'rgba(56, 189, 248, 0.15)',
+                              border: '1px solid rgba(56, 189, 248, 0.3)',
+                              color: '#38bdf8',
+                              padding: '0.1rem 0.4rem',
+                              borderRadius: '4px',
+                              fontWeight: 600
+                            }}>
+                              default
+                            </span>
+                          )}
+                        </div>
+                        
+                        {!isDefault && (
+                          <button
+                            className="btn btn-danger"
+                            style={{
+                              padding: '0.35rem 0.75rem',
+                              fontSize: '0.8rem'
+                            }}
+                            onClick={async () => {
+                              if (window.confirm(`Are you sure you want to delete branch "${branchName}"?`)) {
+                                try {
+                                  await apiClient.delete(`/api/repos/${owner}/${repo}/branches/${branchName}`);
+                                  loadMetadata();
+                                } catch (err) {
+                                  alert('Failed to delete branch: ' + (err.response?.data || err.message));
+                                }
+                              }
+                            }}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Danger Zone */}

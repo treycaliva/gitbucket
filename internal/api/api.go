@@ -23,6 +23,7 @@ import (
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
+	"gitbucket/internal/sync"
 )
 
 var usernameRegex = regexp.MustCompile("^[a-zA-Z0-9-]{3,20}$")
@@ -35,16 +36,18 @@ type APIHandler struct {
 	BucketName      string
 	LocalReposRoot  string
 	AuthHandler     *auth.AuthHandler
+	KMSClient       *sync.KMSClient
 }
 
 // NewAPIHandler creates a new APIHandler.
-func NewAPIHandler(client *firestore.Client, storageClient *storage.Client, bucketName, localReposRoot string, authHandler *auth.AuthHandler) *APIHandler {
+func NewAPIHandler(client *firestore.Client, storageClient *storage.Client, bucketName, localReposRoot string, authHandler *auth.AuthHandler, kmsClient *sync.KMSClient) *APIHandler {
 	return &APIHandler{
 		FirestoreClient: client,
 		StorageClient:   storageClient,
 		BucketName:      bucketName,
 		LocalReposRoot:  localReposRoot,
 		AuthHandler:     authHandler,
+		KMSClient:       kmsClient,
 	}
 }
 
@@ -68,6 +71,9 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 		})
 
 		r.Get("/config", h.GetConfig)
+		r.Post("/webhooks/github", h.HandleGitHubWebhook)
+		r.Post("/webhooks/cloudbuild", h.HandleCloudBuildWebhook)
+		r.Post("/tasks/sync-github", h.HandleSyncTask)
 
 		// Optional auth group
 		r.Group(func(r chi.Router) {
@@ -90,6 +96,10 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/collaborators", h.ListCollaboratorsHandler)
 
 			r.Get("/repos/{owner}/{repo}/branch-protection", h.ListBranchProtectionHandler)
+
+			r.Get("/repos/{owner}/{repo}/sync/wait", h.WaitSync)
+			r.Get("/repos/{owner}/{repo}/builds/{buildId}/logs", h.GetBuildLogsSignedURL)
+			r.Get("/repos/{owner}/{repo}/builds/{buildId}/logs/stream", h.HandleLiveLogsStream)
 		})
 
 		// Authenticated group
@@ -119,6 +129,11 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Post("/repos/{owner}/{repo}/branch-protection", h.CreateBranchProtectionHandler)
 			r.Put("/repos/{owner}/{repo}/branch-protection/{ruleId}", h.UpdateBranchProtectionHandler)
 			r.Delete("/repos/{owner}/{repo}/branch-protection/{ruleId}", h.DeleteBranchProtectionHandler)
+
+			r.Get("/repos/{owner}/{repo}/sync/config", h.GetSyncConfig)
+			r.Post("/repos/{owner}/{repo}/sync/config", h.UpdateSyncConfig)
+			r.Post("/repos/{owner}/{repo}/sync/resolve", h.ResolveSyncConflict)
+			r.Post("/repos/{owner}/{repo}/builds/ticket", h.GetLogTicket)
 		})
 	})
 }
@@ -533,7 +548,6 @@ func (h *APIHandler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(updates) > 0 {
-		updates["updatedAt"] = firestore.ServerTimestamp
 		err = db.UpdateRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo, updates)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to update repository settings: %v", err), http.StatusInternalServerError)
@@ -649,6 +663,17 @@ func (h *APIHandler) DeleteBranch(w http.ResponseWriter, r *http.Request) {
 	updatedMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err == nil && updatedMeta != nil {
 		_ = writeLocalSyncTimestamp(localRepoPath, getUpdatedAtMs(updatedMeta))
+		
+		// Trigger GitHub Sync if configured
+		if ghSyncVal, ok := updatedMeta["githubSync"]; ok {
+			if ghSync, ok := ghSyncVal.(map[string]interface{}); ok {
+				enabled, _ := ghSync["enabled"].(bool)
+				direction, _ := ghSync["direction"].(string)
+				if enabled && (direction == "mirror-to-github" || direction == "bidirectional") {
+					h.TriggerSyncTask(owner, repo, direction, false, "")
+				}
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -748,6 +773,8 @@ type CommitInfo struct {
 	AuthorEmail string `json:"authorEmail"`
 	Date        string `json:"date"`
 	Message     string `json:"message"`
+	Status      string `json:"status,omitempty"`
+	BuildID     string `json:"buildId,omitempty"`
 }
 
 // GetCommitHistory handles GET /api/repos/{owner}/{repo}/commits/{branch}
@@ -804,6 +831,44 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if commits == nil {
 		commits = []CommitInfo{}
+	} else if len(commits) > 0 {
+		// Decorate commits with GCB statuses from Firestore
+		statusQuery := h.FirestoreClient.Collection("commit_statuses").
+			Where("owner", "==", owner).
+			Where("repo", "==", repo)
+		statusDocs, err := statusQuery.Documents(r.Context()).GetAll()
+		if err == nil {
+			shaToStatus := make(map[string]map[string]interface{})
+			for _, doc := range statusDocs {
+				var data map[string]interface{}
+				if err := doc.DataTo(&data); err == nil {
+					sha, _ := data["sha"].(string)
+					if sha != "" {
+						existing, exists := shaToStatus[sha]
+						if !exists {
+							shaToStatus[sha] = data
+						} else {
+							var curCreated, newCreated time.Time
+							if t, ok := existing["createdAt"].(time.Time); ok {
+								curCreated = t
+							}
+							if t, ok := data["createdAt"].(time.Time); ok {
+								newCreated = t
+							}
+							if newCreated.After(curCreated) {
+								shaToStatus[sha] = data
+							}
+						}
+					}
+				}
+			}
+			for i := range commits {
+				if statusData, ok := shaToStatus[commits[i].SHA]; ok {
+					commits[i].Status, _ = statusData["status"].(string)
+					commits[i].BuildID, _ = statusData["buildId"].(string)
+				}
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -831,8 +896,34 @@ func (h *APIHandler) GetCommitDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]string{
+	var statusVal, buildIDVal string
+	statusDocs, err := h.FirestoreClient.Collection("commit_statuses").
+		Where("owner", "==", owner).
+		Where("repo", "==", repo).
+		Where("sha", "==", sha).
+		Documents(r.Context()).GetAll()
+	if err == nil && len(statusDocs) > 0 {
+		var latestCreated time.Time
+		for _, doc := range statusDocs {
+			var data map[string]interface{}
+			if err := doc.DataTo(&data); err == nil {
+				var created time.Time
+				if t, ok := data["createdAt"].(time.Time); ok {
+					created = t
+				}
+				if created.After(latestCreated) || latestCreated.IsZero() {
+					latestCreated = created
+					statusVal, _ = data["status"].(string)
+					buildIDVal, _ = data["buildId"].(string)
+				}
+			}
+		}
+	}
+
+	resp := map[string]interface{}{
 		"rawDiff": stdout.String(),
+		"status":  statusVal,
+		"buildId": buildIDVal,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

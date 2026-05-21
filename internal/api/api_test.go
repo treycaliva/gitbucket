@@ -16,6 +16,7 @@ import (
 
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
+	"gitbucket/internal/sync"
 )
 
 func randSuffix() string {
@@ -38,7 +39,7 @@ func TestAPIHandler(t *testing.T) {
 	defer client.Close()
 
 	authHandler := auth.NewAuthHandler(true, nil, client) // DevMode = true, using firestore client
-	apiHandler := NewAPIHandler(client, nil, "", "", authHandler)
+	apiHandler := NewAPIHandler(client, nil, "", "", authHandler, sync.NewKMSClient(nil, ""))
 
 	r := chi.NewRouter()
 	apiHandler.RegisterRoutes(r)
@@ -162,5 +163,81 @@ func TestAPIHandler(t *testing.T) {
 	json.NewDecoder(rrList2.Body).Decode(&listResp2)
 	if len(listResp2) != 0 {
 		t.Errorf("expected 0 tokens after revocation, got %d", len(listResp2))
+	}
+}
+
+// TestUpdateRepositorySettings is a regression test for the bug where saving
+// repo settings failed with "field path [updatedAt] cannot be used in the same
+// update as [updatedAt]" because both the handler and UpdateRepositoryMetadata
+// set the updatedAt path.
+func TestUpdateRepositorySettings(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("Skipping: FIRESTORE_EMULATOR_HOST not set")
+	}
+
+	ctx := context.Background()
+	client, err := db.NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("failed to create db client: %v", err)
+	}
+	defer client.Close()
+
+	authHandler := auth.NewAuthHandler(true, nil, client)
+	apiHandler := NewAPIHandler(client, nil, "", "", authHandler, sync.NewKMSClient(nil, ""))
+	r := chi.NewRouter()
+	apiHandler.RegisterRoutes(r)
+
+	suffix := randSuffix()
+	uid := "settings-uid-" + suffix
+	username := "settings-" + suffix
+	repoName := "repo-" + suffix
+	authBearer := "Bearer mock_" + uid
+
+	// Register username
+	body, _ := json.Marshal(map[string]string{"username": username})
+	req := httptest.NewRequest("POST", "/api/user/username", bytes.NewBuffer(body))
+	req.Header.Set("Authorization", authBearer)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("register username failed: %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Create repository
+	createBody, _ := json.Marshal(map[string]string{"name": repoName, "visibility": "public"})
+	reqCreate := httptest.NewRequest("POST", "/api/repos", bytes.NewBuffer(createBody))
+	reqCreate.Header.Set("Authorization", authBearer)
+	rrCreate := httptest.NewRecorder()
+	r.ServeHTTP(rrCreate, reqCreate)
+	if rrCreate.Code != http.StatusOK {
+		t.Fatalf("create repo failed: %d %s", rrCreate.Code, rrCreate.Body.String())
+	}
+
+	// PATCH autoDeleteHeadBranches — this was previously hitting the duplicate-updatedAt bug
+	patchBody, _ := json.Marshal(map[string]interface{}{"autoDeleteHeadBranches": true})
+	reqPatch := httptest.NewRequest("PATCH", "/api/repos/"+username+"/"+repoName, bytes.NewBuffer(patchBody))
+	reqPatch.Header.Set("Authorization", authBearer)
+	rrPatch := httptest.NewRecorder()
+	r.ServeHTTP(rrPatch, reqPatch)
+	if rrPatch.Code != http.StatusOK {
+		t.Fatalf("PATCH settings failed: %d %s", rrPatch.Code, rrPatch.Body.String())
+	}
+
+	var meta map[string]interface{}
+	if err := json.NewDecoder(rrPatch.Body).Decode(&meta); err != nil {
+		t.Fatalf("decode patch response: %v", err)
+	}
+	if v, _ := meta["autoDeleteHeadBranches"].(bool); !v {
+		t.Errorf("expected autoDeleteHeadBranches=true in response, got %v", meta["autoDeleteHeadBranches"])
+	}
+
+	// PATCH again with a different field to ensure repeated saves work
+	patchBody2, _ := json.Marshal(map[string]interface{}{"description": "updated"})
+	reqPatch2 := httptest.NewRequest("PATCH", "/api/repos/"+username+"/"+repoName, bytes.NewBuffer(patchBody2))
+	reqPatch2.Header.Set("Authorization", authBearer)
+	rrPatch2 := httptest.NewRecorder()
+	r.ServeHTTP(rrPatch2, reqPatch2)
+	if rrPatch2.Code != http.StatusOK {
+		t.Fatalf("second PATCH failed: %d %s", rrPatch2.Code, rrPatch2.Body.String())
 	}
 }
