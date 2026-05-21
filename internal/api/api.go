@@ -1112,6 +1112,7 @@ func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"devMode":  devMode,
 		"firebase": firebaseConfig,
+		"gitUrl":   os.Getenv("GIT_URL"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
