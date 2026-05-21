@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
 
@@ -33,6 +34,7 @@ func (h *APIHandler) ListBranchProtectionHandler(w http.ResponseWriter, r *http.
 
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("branch_protection: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -73,6 +75,7 @@ func (h *APIHandler) CreateBranchProtectionHandler(w http.ResponseWriter, r *htt
 
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("branch_protection: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -121,6 +124,7 @@ func (h *APIHandler) UpdateBranchProtectionHandler(w http.ResponseWriter, r *htt
 
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("branch_protection: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -172,6 +176,7 @@ func (h *APIHandler) DeleteBranchProtectionHandler(w http.ResponseWriter, r *htt
 
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("branch_protection: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}

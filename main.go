@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"net"
@@ -67,6 +68,42 @@ func ipGatingMiddleware(restrictedIP string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// errorLoggerResponseWriter captures status and (for 5xx) the first chunk of
+// response body so the errorLogger middleware can log the actual error message
+// after the handler returns.
+type errorLoggerResponseWriter struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+const errorLoggerBodyLimit = 4096
+
+func (w *errorLoggerResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *errorLoggerResponseWriter) Write(b []byte) (int, error) {
+	if w.status >= 500 && w.body.Len() < errorLoggerBodyLimit {
+		w.body.Write(b[:min(len(b), errorLoggerBodyLimit-w.body.Len())])
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// errorLogger logs the response body of any 5xx response. Without this,
+// http.Error(w, err.Error(), 500) sends the underlying error to the client
+// but leaves no record server-side, which makes prod debugging painful.
+func errorLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &errorLoggerResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if rec.status >= 500 {
+			log.Printf("[5xx] %s %s -> %d: %s", r.Method, r.URL.Path, rec.status, strings.TrimSpace(rec.body.String()))
+		}
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -159,6 +196,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(errorLogger)
 	r.Use(ipGatingMiddleware(cfg.RestrictedIP))
 	r.Use(corsMiddleware)
 

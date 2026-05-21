@@ -131,6 +131,7 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 	// 1. Fetch Repository Metadata
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("git: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -595,6 +596,7 @@ func (h *APIHandler) HandleLFSUpload(w http.ResponseWriter, r *http.Request) {
 	// 1. Fetch metadata and check ownership
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("git: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -681,6 +683,7 @@ func (h *APIHandler) HandleLFSDownload(w http.ResponseWriter, r *http.Request) {
 	// 1. Fetch metadata and check permissions
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("git: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}

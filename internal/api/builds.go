@@ -439,6 +439,7 @@ func (h *APIHandler) GetLogTicket(w http.ResponseWriter, r *http.Request) {
 	// Authorize user has read access
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("builds: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -470,6 +471,7 @@ func (h *APIHandler) GetBuildLogsSignedURL(w http.ResponseWriter, r *http.Reques
 	// 1. Authorize user (must have read access)
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("builds: GetRepositoryMetadata(%s/%s): %v", owner, repo, err)
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -493,6 +495,7 @@ func (h *APIHandler) GetBuildLogsSignedURL(w http.ResponseWriter, r *http.Reques
 		Limit(1)
 	docs, err := query.Documents(r.Context()).GetAll()
 	if err != nil {
+		log.Printf("builds: commit_statuses query for %s/%s buildID=%s: %v", owner, repo, buildID, err)
 		http.Error(w, "Database error querying status", http.StatusInternalServerError)
 		return
 	}
@@ -503,6 +506,7 @@ func (h *APIHandler) GetBuildLogsSignedURL(w http.ResponseWriter, r *http.Reques
 
 	var data map[string]interface{}
 	if err := docs[0].DataTo(&data); err != nil {
+		log.Printf("builds: commit_statuses DataTo for %s/%s buildID=%s: %v", owner, repo, buildID, err)
 		http.Error(w, "Data serialization error", http.StatusInternalServerError)
 		return
 	}

@@ -142,6 +142,7 @@ func (h *APIHandler) UpdateSyncConfig(w http.ResponseWriter, r *http.Request) {
 	// Fetch updated metadata to return
 	updatedMetaMap, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("sync: GetRepositoryMetadata(%s/%s) after update: %v", owner, repo, err)
 		http.Error(w, "Failed to fetch updated metadata", http.StatusInternalServerError)
 		return
 	}
