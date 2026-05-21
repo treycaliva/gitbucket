@@ -5,13 +5,19 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/golang-jwt/jwt/v4"
 )
+
+// errInvalidJWT is the single sentinel returned for all Verify failures.
+// Callers (and HTTP clients) never learn which check failed — see logs for detail.
+var errInvalidJWT = errors.New("invalid jwt")
 
 // JWTVerifier verifies App-signed JWTs against per-app public keys cached
 // in-process. Cache TTL is enforced via the cacheTTL passed to NewJWTVerifier.
@@ -48,54 +54,78 @@ func NewJWTVerifier(fs *firestore.Client, cacheTTL time.Duration) *JWTVerifier {
 // non-specific (no leaks about which check failed) and all map to 401 at the
 // HTTP layer.
 func (v *JWTVerifier) Verify(ctx context.Context, tokenStr string) (*App, error) {
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Name}))
-	// First parse claims without verifying signature to extract `iss`.
-	parsed, _, err := parser.ParseUnverified(tokenStr, jwt.MapClaims{})
+	// ParseUnverified to extract `iss` before we know which pubkey to use.
+	// Use a parser that skips claims validation so we are not subject to the
+	// library's zero-leeway exp check during this step.
+	unverifiedParser := jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Name}))
+	parsed, _, err := unverifiedParser.ParseUnverified(tokenStr, jwt.MapClaims{})
 	if err != nil {
-		return nil, fmt.Errorf("invalid jwt")
+		log.Printf("[apps.jwt] reject: malformed token: %v", err)
+		return nil, errInvalidJWT
 	}
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, fmt.Errorf("invalid jwt claims")
+		log.Printf("[apps.jwt] reject: claims not MapClaims")
+		return nil, errInvalidJWT
 	}
 	iss, _ := claims["iss"].(string)
 	if iss == "" {
-		return nil, fmt.Errorf("missing iss")
+		log.Printf("[apps.jwt] reject: missing iss")
+		return nil, errInvalidJWT
 	}
 
 	entry, err := v.loadEntry(ctx, iss)
 	if err != nil || entry == nil {
-		return nil, fmt.Errorf("invalid jwt")
+		log.Printf("[apps.jwt] reject: unknown issuer %q: %v", iss, err)
+		return nil, errInvalidJWT
 	}
 	if entry.app.SuspendedAt != nil {
-		return nil, fmt.Errorf("app suspended")
+		log.Printf("[apps.jwt] reject: app %s is suspended", iss)
+		return nil, errInvalidJWT
 	}
 
-	// Now verify signature with the cached pubkey.
-	_, err = parser.Parse(tokenStr, func(_ *jwt.Token) (interface{}, error) {
+	// Verify signature only. SkipClaimsValidation=true bypasses the library's
+	// zero-leeway exp/iat check so our manual checks below (with jwtClockSkew)
+	// are not dead code — the library would otherwise reject expired-by-1s tokens
+	// before we ever reach the grace-window logic.
+	sigParser := &jwt.Parser{
+		ValidMethods:         []string{jwt.SigningMethodRS256.Name},
+		SkipClaimsValidation: true,
+	}
+	_, err = sigParser.Parse(tokenStr, func(_ *jwt.Token) (interface{}, error) {
 		return entry.pubKey, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("invalid jwt signature")
+		log.Printf("[apps.jwt] reject: signature invalid for app %s: %v", iss, err)
+		return nil, errInvalidJWT
 	}
 
 	now := time.Now()
 	iatF, _ := claims["iat"].(float64)
 	expF, _ := claims["exp"].(float64)
 	if iatF == 0 || expF == 0 {
-		return nil, fmt.Errorf("missing iat/exp")
+		log.Printf("[apps.jwt] reject: missing iat/exp for app %s", iss)
+		return nil, errInvalidJWT
 	}
 	iat := time.Unix(int64(iatF), 0)
 	exp := time.Unix(int64(expF), 0)
 
+	// iat must not be in the future (beyond clock skew tolerance).
 	if iat.After(now.Add(jwtClockSkew)) {
-		return nil, fmt.Errorf("iat in future")
+		log.Printf("[apps.jwt] reject: iat in future for app %s", iss)
+		return nil, errInvalidJWT
 	}
+	// exp must not be in the past (beyond clock skew tolerance).
+	// This is the live check — the library's check is skipped above so this leeway
+	// is real and not dead code.
 	if exp.Before(now.Add(-jwtClockSkew)) {
-		return nil, fmt.Errorf("exp in past")
+		log.Printf("[apps.jwt] reject: token expired for app %s", iss)
+		return nil, errInvalidJWT
 	}
+	// Enforce maximum lifetime window (library does not check this).
 	if exp.Sub(iat) > jwtMaxExpWindow+jwtClockSkew {
-		return nil, fmt.Errorf("exp window too wide")
+		log.Printf("[apps.jwt] reject: exp window too wide for app %s", iss)
+		return nil, errInvalidJWT
 	}
 	return entry.app, nil
 }

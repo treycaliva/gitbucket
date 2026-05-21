@@ -145,4 +145,33 @@ func TestVerifyAppJWT(t *testing.T) {
 		})
 		verifier.InvalidateCache(app.AppID)
 	})
+
+	t.Run("error messages are generic", func(t *testing.T) {
+		// Try every failure path; all errors should be the same string.
+		now := time.Now()
+		cases := []string{
+			signTestJWT(t, "no-such-app", priv, now, now.Add(5*time.Minute)),
+			signTestJWT(t, app.AppID, priv, now.Add(-time.Hour), now.Add(-30*time.Minute)),
+			signTestJWT(t, app.AppID, priv, now, now.Add(20*time.Minute)),
+			"not.a.jwt",
+		}
+		other, _ := rsa.GenerateKey(rand.Reader, 2048)
+		cases = append(cases, signTestJWT(t, app.AppID, other, now, now.Add(5*time.Minute)))
+
+		var seen string
+		for i, tok := range cases {
+			_, err := verifier.Verify(ctx, tok)
+			if err == nil {
+				t.Errorf("case %d expected error", i)
+				continue
+			}
+			if seen == "" {
+				seen = err.Error()
+				continue
+			}
+			if err.Error() != seen {
+				t.Errorf("case %d error %q differs from earlier %q — error messages should be generic", i, err.Error(), seen)
+			}
+		}
+	})
 }
