@@ -20,6 +20,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/go-chi/chi/v5"
 
+	"gitbucket/internal/apps"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
@@ -151,6 +152,11 @@ func (h *APIHandler) RegisterUsername(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if apps.IsBotUsername(req.Username) {
+		http.Error(w, "username is reserved", http.StatusBadRequest)
 		return
 	}
 
