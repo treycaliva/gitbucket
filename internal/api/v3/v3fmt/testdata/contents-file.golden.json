@@ -1,0 +1,12 @@
+{
+  "type": "file",
+  "encoding": "base64",
+  "size": 42,
+  "name": "README.md",
+  "path": "README.md",
+  "content": "IyBIZWxsbwoKVGhpcyBpcyBhIHRlc3QuCg==",
+  "sha": "abc123def456",
+  "url": "https://gitbucket.example.com/api/v3/repos/alice/demo/contents/README.md?ref=main",
+  "html_url": "https://gitbucket.example.com/alice/demo/blob/main/README.md",
+  "download_url": "https://gitbucket.example.com/alice/demo/raw/main/README.md"
+}

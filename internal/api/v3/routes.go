@@ -30,5 +30,6 @@ func RegisterV3Routes(r chi.Router, h *V3Handler) {
 
 		// Real endpoints.
 		r.Get("/repos/{owner}/{repo}", h.GetRepo)
+		r.Get("/repos/{owner}/{repo}/contents/*", h.GetContents)
 	})
 }
