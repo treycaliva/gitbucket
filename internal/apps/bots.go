@@ -66,6 +66,16 @@ func CreateBotUser(ctx context.Context, fs *firestore.Client, slug, displayName,
 		if err != nil && status.Code(err) != codes.NotFound {
 			return err
 		}
+
+		// Defend against UID collision: ensure the user doc does not already exist.
+		userDoc, err := tx.Get(userRef)
+		if err == nil && userDoc.Exists() {
+			return fmt.Errorf("bot uid %q already exists (collision)", uid)
+		}
+		if err != nil && status.Code(err) != codes.NotFound {
+			return err
+		}
+
 		if err := tx.Set(usernameRef, map[string]interface{}{"uid": uid}); err != nil {
 			return err
 		}
@@ -81,7 +91,7 @@ func CreateBotUser(ctx context.Context, fs *firestore.Client, slug, displayName,
 		})
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create bot user %q: %w", slug, err)
 	}
 	return uid, nil
 }

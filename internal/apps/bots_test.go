@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"strings"
 	"testing"
 
 	"gitbucket/internal/db"
@@ -27,9 +28,12 @@ func TestBotUsernameValidator(t *testing.T) {
 		ok   bool
 	}{
 		{"claude-code", "claude-code[bot]", true},
-		{"a", "", false},          // too short
-		{string(tooLong), "", false}, // too long
-		{"bad!", "", false},        // invalid chars
+		{"a", "", false},             // too short (1 char)
+		{"ab", "", false},            // too short (2 chars, fence-post)
+		{"abc", "abc[bot]", true},   // exactly 3 chars (minimum valid)
+		{strings.Repeat("a", 20), strings.Repeat("a", 20) + "[bot]", true}, // exactly 20 chars (maximum valid)
+		{string(tooLong), "", false}, // too long (21 chars)
+		{"bad!", "", false},          // invalid chars
 	}
 	for _, c := range cases {
 		got, err := BotUsernameForSlug(c.slug)
@@ -52,6 +56,22 @@ func TestIsBotUsername(t *testing.T) {
 	if IsBotUsername("claude-code") {
 		t.Error("claude-code should not be a bot username")
 	}
+	// fence-post: minimum valid slug (3 chars)
+	if !IsBotUsername("abc[bot]") {
+		t.Error("abc[bot] should be a bot username (minimum valid slug)")
+	}
+	// slug too short (2 chars) → not a bot username
+	if IsBotUsername("ab[bot]") {
+		t.Error("ab[bot] should not be a bot username (slug too short)")
+	}
+	// uppercase slug — slugRegex allows uppercase
+	if !IsBotUsername("CLAUDE[bot]") {
+		t.Error("CLAUDE[bot] should be a bot username (uppercase slug is valid)")
+	}
+	// empty string
+	if IsBotUsername("") {
+		t.Error("empty string should not be a bot username")
+	}
 }
 
 func TestCreateBotUser(t *testing.T) {
@@ -66,7 +86,16 @@ func TestCreateBotUser(t *testing.T) {
 	defer fs.Close()
 
 	slug := "test-bot-" + randHex(4)
-	uid, err := CreateBotUser(ctx, fs, slug, "Test Bot", "https://example.com/a.png", "app-xyz")
+	var uid string
+	t.Cleanup(func() {
+		cctx := context.Background()
+		if uid != "" {
+			_, _ = fs.Collection(CollectionUsers).Doc(uid).Delete(cctx)
+		}
+		_, _ = fs.Collection("usernames").Doc(slug + "[bot]").Delete(cctx)
+	})
+
+	uid, err = CreateBotUser(ctx, fs, slug, "Test Bot", "https://example.com/a.png", "app-xyz")
 	if err != nil {
 		t.Fatalf("CreateBotUser: %v", err)
 	}
@@ -88,8 +117,4 @@ func TestCreateBotUser(t *testing.T) {
 	if data["owning_app_id"] != "app-xyz" {
 		t.Errorf("owning_app_id = %v, want app-xyz", data["owning_app_id"])
 	}
-
-	// cleanup
-	_, _ = fs.Collection(CollectionUsers).Doc(uid).Delete(ctx)
-	_, _ = fs.Collection("usernames").Doc(slug + "[bot]").Delete(ctx)
 }
