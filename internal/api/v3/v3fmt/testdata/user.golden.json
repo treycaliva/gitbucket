@@ -1,0 +1,10 @@
+{
+  "login": "alice",
+  "id": 6538414913668952369,
+  "node_id": "VXNlcjo2NTM4NDE0OTEzNjY4OTUyMzY5",
+  "avatar_url": "https://gitbucket.example.com/avatars/alice",
+  "html_url": "https://gitbucket.example.com/alice",
+  "url": "https://gitbucket.example.com/api/v3/users/alice",
+  "type": "User",
+  "site_admin": false
+}
