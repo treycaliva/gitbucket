@@ -28,6 +28,7 @@ func RegisterV3Routes(r chi.Router, h *V3Handler) {
 			})
 		})
 
-		// Real endpoints land in Tasks 3-7.
+		// Real endpoints.
+		r.Get("/repos/{owner}/{repo}", h.GetRepo)
 	})
 }
