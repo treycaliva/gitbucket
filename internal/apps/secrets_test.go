@@ -39,3 +39,19 @@ func TestMemorySecretStore_GetUnknown(t *testing.T) {
 		t.Error("expected error for unknown resource")
 	}
 }
+
+func TestMemorySecretStore_GetReturnsIndependentCopy(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemorySecretStore()
+	name, _ := s.Put(ctx, "k", []byte("original"))
+
+	first, _ := s.Get(ctx, name)
+	for i := range first {
+		first[i] = 'X' // simulate caller zeroizing the buffer
+	}
+
+	second, _ := s.Get(ctx, name)
+	if string(second) != "original" {
+		t.Errorf("second Get returned %q, want %q — mutating first call corrupted store", second, "original")
+	}
+}

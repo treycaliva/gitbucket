@@ -3,10 +3,13 @@ package apps
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // SecretStore abstracts secret persistence so production can use Secret Manager
@@ -48,7 +51,7 @@ func (s *MemorySecretStore) Get(_ context.Context, resourceName string) ([]byte,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	key := resourceName
-	if len(resourceName) > len("memory://") && resourceName[:len("memory://")] == "memory://" {
+	if strings.HasPrefix(resourceName, "memory://") {
 		key = resourceName[len("memory://"):]
 	}
 	v, ok := s.m[key]
@@ -64,7 +67,7 @@ func (s *MemorySecretStore) Delete(_ context.Context, resourceName string) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := resourceName
-	if len(resourceName) > len("memory://") && resourceName[:len("memory://")] == "memory://" {
+	if strings.HasPrefix(resourceName, "memory://") {
 		key = resourceName[len("memory://"):]
 	}
 	delete(s.m, key)
@@ -120,7 +123,10 @@ func (s *RealSecretStore) Get(ctx context.Context, resourceName string) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("access secret %s: %w", resourceName, err)
 	}
-	return resp.Payload.Data, nil
+	data := resp.Payload.Data
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	return cp, nil
 }
 
 func (s *RealSecretStore) Delete(ctx context.Context, resourceName string) error {
@@ -162,17 +168,8 @@ func trimVersion(s string) string {
 }
 
 func isAlreadyExists(err error) bool {
-	return err != nil && (containsCode(err, "AlreadyExists") || containsCode(err, "already exists"))
+	return status.Code(err) == codes.AlreadyExists
 }
 func isNotFound(err error) bool {
-	return err != nil && (containsCode(err, "NotFound") || containsCode(err, "not found"))
-}
-func containsCode(err error, needle string) bool {
-	s := err.Error()
-	for i := 0; i+len(needle) <= len(s); i++ {
-		if s[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
+	return status.Code(err) == codes.NotFound
 }
