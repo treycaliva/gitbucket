@@ -23,7 +23,7 @@ async function request(url, options = {}) {
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
         const errBody = await response.json();
-        errorMsg = errBody.error || errorMsg;
+        errorMsg = errBody.error || errBody.message || errorMsg;
       } else {
         const textBody = await response.text();
         errorMsg = textBody || errorMsg;

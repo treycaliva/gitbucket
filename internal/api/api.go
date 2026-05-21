@@ -87,6 +87,8 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/tree/{branch}/*", h.GetTree)
 			r.Get("/repos/{owner}/{repo}/blob/{branch}/*", h.GetBlob)
 			r.Get("/repos/{owner}/{repo}/codeowners", h.CodeOwnersHandler)
+			r.Get("/repos/{owner}/{repo}/tags", h.ListTags)
+			r.Get("/repos/{owner}/{repo}/refs/{branch}/head", h.GetBranchHead)
 
 			r.Get("/repos/{owner}/{repo}/pulls", h.ListPullRequests)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPullRequest)
@@ -122,6 +124,7 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Post("/repos/{owner}/{repo}/pulls", h.CreatePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/merge", h.MergePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/close", h.ClosePullRequest)
+			r.Post("/repos/{owner}/{repo}/pulls/{number}/update", h.UpdatePullRequestBranch)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/reviews", h.SubmitReviewHandler)
 
 			r.Post("/repos/{owner}/{repo}/collaborators", h.AddCollaboratorHandler)
@@ -873,8 +876,23 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
+	if limit > 200 {
+		limit = 200
+	}
 
-	cmd := exec.Command("git", "--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit), `--format=%H|%an|%ae|%ad|%s`, branch)
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	args := []string{"--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit)}
+	if offset > 0 {
+		args = append(args, "--skip", strconv.Itoa(offset))
+	}
+	args = append(args, `--format=%H|%an|%ae|%ad|%s`, branch)
+	cmd := exec.Command("git", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1154,6 +1172,7 @@ func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"devMode":  devMode,
 		"firebase": firebaseConfig,
+		"gitUrl":   os.Getenv("GIT_URL"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

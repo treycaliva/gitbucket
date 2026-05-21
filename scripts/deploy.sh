@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build and deploy GitBucket to Cloud Run via Cloud Build (source deploy).
+# Build and deploy GitBucket: Go backend to Cloud Run, React frontend to Firebase Hosting.
 # Preserves existing env vars / IAM / scaling on the service.
 #
 # Usage:
-#   scripts/deploy.sh                    # deploy to default service
+#   scripts/deploy.sh                    # deploy to default service and hosting
 #   SERVICE=gitbucket-staging scripts/deploy.sh
 #   REGION=us-east1 scripts/deploy.sh
 
@@ -22,18 +22,23 @@ fi
 
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
-# Pre-flight: compile the Go binary the same way the Dockerfile does, so we
-# don't ship syntactically broken code and wait ~5 min for Cloud Build to tell us.
-echo "==> pre-flight: go build"
+# Pre-flight backend check: compile the Go binary locally so we catch syntax errors early
+echo "==> pre-flight: go build check"
 CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /dev/null main.go
 
-echo "==> deploying $SERVICE to $REGION (project=$PROJECT_ID, sha=$GIT_SHA)"
+# Pre-flight frontend check: build the static React assets locally
+echo "==> building frontend assets"
+(cd frontend && npm install && npm run build)
 
+echo "==> deploying Go backend $SERVICE to Cloud Run in $REGION (project=$PROJECT_ID, sha=$GIT_SHA)"
 gcloud run deploy "$SERVICE" \
   --project="$PROJECT_ID" \
   --region="$REGION" \
   --source=. \
   --quiet
+
+echo "==> deploying React frontend to Firebase Hosting"
+npx -y firebase-tools deploy --only hosting --project "$PROJECT_ID"
 
 echo "==> done"
 gcloud run services describe "$SERVICE" \
