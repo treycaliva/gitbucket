@@ -1,6 +1,7 @@
 package v3
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -96,6 +97,18 @@ func (h *V3Handler) CreatePull(w http.ResponseWriter, r *http.Request) {
 		apps.WriteError(w, apps.ErrUnprocessable)
 		return
 	}
+	apps.Fire(r.Context(), h.Events, apps.PullRequestPayload{
+		Action:     "opened",
+		Number:     pr.Number,
+		Title:      pr.Title,
+		Body:       pr.Description,
+		State:      "open",
+		HeadBranch: pr.SourceBranch,
+		BaseBranch: pr.TargetBranch,
+		OwnerLogin: owner,
+		RepoName:   repo,
+		Sender:     senderFromCtx(r.Context()),
+	})
 	apps.WriteJSON(w, http.StatusCreated, pullToFormatter(*pr, owner, repo, h.URLs))
 }
 
@@ -145,7 +158,38 @@ func (h *V3Handler) UpdatePull(w http.ResponseWriter, r *http.Request) {
 		apps.WriteError(w, apps.ErrNotFound)
 		return
 	}
+	action := "edited"
+	if req.State == "closed" {
+		action = "closed"
+	} else if req.State == "open" {
+		action = "reopened"
+	}
+	apps.Fire(r.Context(), h.Events, apps.PullRequestPayload{
+		Action:     action,
+		Number:     pr.Number,
+		Title:      pr.Title,
+		Body:       pr.Description,
+		State:      pr.Status, // "open" | "closed" | "merged"
+		HeadBranch: pr.SourceBranch,
+		BaseBranch: pr.TargetBranch,
+		OwnerLogin: owner,
+		RepoName:   repo,
+		Sender:     senderFromCtx(r.Context()),
+	})
 	apps.WriteJSON(w, http.StatusOK, pullToFormatter(*pr, owner, repo, h.URLs))
+}
+
+// senderFromCtx derives a SenderRef from the installation context. The
+// actor on any v3 write is the App's bot user.
+func senderFromCtx(ctx context.Context) apps.SenderRef {
+	ic := apps.InstallationContextFrom(ctx)
+	if ic == nil {
+		return apps.SenderRef{Login: "unknown", Type: "User"}
+	}
+	return apps.SenderRef{
+		Login: "app-" + ic.AppID + "[bot]",
+		Type:  "Bot",
+	}
 }
 
 // pullToFormatter translates db.PullRequest → v3fmt.PullRequestDTO.

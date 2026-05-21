@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gitbucket/internal/apps"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
@@ -188,6 +189,19 @@ func (h *APIHandler) CreatePullRequest(w http.ResponseWriter, r *http.Request) {
 		log.Printf("codeowners: set reviewers for PR %d: %v", pr.Number, err)
 	}
 	pr.RequestedReviewers = reviewers
+
+	apps.Fire(r.Context(), h.Events, apps.PullRequestPayload{
+		Action:     "opened",
+		Number:     pr.Number,
+		Title:      pr.Title,
+		Body:       pr.Description,
+		State:      "open",
+		HeadBranch: pr.SourceBranch,
+		BaseBranch: pr.TargetBranch,
+		OwnerLogin: owner,
+		RepoName:   repo,
+		Sender:     apps.SenderRef{Login: username, Type: "User"},
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -450,6 +464,19 @@ func (h *APIHandler) ClosePullRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	apps.Fire(r.Context(), h.Events, apps.PullRequestPayload{
+		Action:     "closed",
+		Number:     pr.Number,
+		Title:      pr.Title,
+		Body:       pr.Description,
+		State:      "closed",
+		HeadBranch: pr.SourceBranch,
+		BaseBranch: pr.TargetBranch,
+		OwnerLogin: owner,
+		RepoName:   repo,
+		Sender:     apps.SenderRef{Login: username, Type: "User"},
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -676,6 +703,20 @@ func (h *APIHandler) MergePullRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to update pull request status: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	apps.Fire(r.Context(), h.Events, apps.PullRequestPayload{
+		Action:     "closed",
+		Number:     pr.Number,
+		Title:      pr.Title,
+		Body:       pr.Description,
+		State:      "closed",
+		Merged:     true,
+		HeadBranch: pr.SourceBranch,
+		BaseBranch: pr.TargetBranch,
+		OwnerLogin: owner,
+		RepoName:   repo,
+		Sender:     apps.SenderRef{Login: username, Type: "User"},
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{

@@ -9,6 +9,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
 
+	"gitbucket/internal/apps"
 	"gitbucket/internal/api/v3/v3fmt"
 )
 
@@ -18,6 +19,7 @@ type V3Handler struct {
 	StorageClient   *storage.Client // for repo materialization (GCS → local bare repo)
 	URLs            *v3fmt.URLBuilder
 	LocalReposRoot  string
+	Events          apps.FireDeps // populated by main.go after construction
 }
 
 func NewV3Handler(fs *firestore.Client, sc *storage.Client, baseURL string) *V3Handler {
