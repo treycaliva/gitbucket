@@ -11,13 +11,13 @@ export default function LatestCommitBar({ owner, repo, branch, onViewCommits }) 
   useEffect(() => {
     if (!branch) return;
     let cancelled = false;
+    // Reset so a branch switch clears the prior commit instead of flashing it.
+    setHead(null);
+    setError('');
     apiClient
       .get(`/api/repos/${owner}/${repo}/refs/${encodeURIComponent(branch)}/head`)
       .then((data) => {
-        if (!cancelled) {
-          setHead(data);
-          setError('');
-        }
+        if (!cancelled) setHead(data);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message || 'Failed to load latest commit');

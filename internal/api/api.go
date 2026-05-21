@@ -805,6 +805,9 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
+	if limit > 200 {
+		limit = 200
+	}
 
 	offset := 0
 	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
