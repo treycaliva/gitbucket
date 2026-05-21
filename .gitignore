@@ -38,3 +38,9 @@ tmp/
 
 # Logs
 *.log
+
+# Built binaries
+gitbucket
+
+# Temp scratch files
+scratch/

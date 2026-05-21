@@ -19,6 +19,7 @@ import (
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	gitpkg "gitbucket/internal/git"
+	"gitbucket/internal/sync"
 )
 
 func TestPullRequestAPIs(t *testing.T) {
@@ -42,7 +43,7 @@ func TestPullRequestAPIs(t *testing.T) {
 	defer os.RemoveAll(tempReposRoot)
 
 	authHandler := auth.NewAuthHandler(true, nil, client)
-	apiHandler := NewAPIHandler(client, nil, "", tempReposRoot, authHandler)
+	apiHandler := NewAPIHandler(client, nil, "", tempReposRoot, authHandler, sync.NewKMSClient(nil, ""))
 
 	r := chi.NewRouter()
 	apiHandler.RegisterRoutes(r)
@@ -374,7 +375,7 @@ func setupMergeGateFixture(t *testing.T, ctx context.Context, dbClient *firestor
 	t.Cleanup(func() { _ = os.RemoveAll(tempReposRoot) })
 
 	authH := auth.NewAuthHandler(true, nil, dbClient)
-	apiH := NewAPIHandler(dbClient, nil, "", tempReposRoot, authH)
+	apiH := NewAPIHandler(dbClient, nil, "", tempReposRoot, authH, sync.NewKMSClient(nil, ""))
 	r := chi.NewRouter()
 	apiH.RegisterRoutes(r)
 

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { authService } from '../authService';
 import { Database, Lock, Mail, User } from 'lucide-react';
 
-export default function Login({ onNavigate }) {
+export default function Login({ onNavigate, currentNavigation }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,7 +24,11 @@ export default function Login({ onNavigate }) {
       } else {
         await authService.login(email, password);
       }
-      onNavigate('dashboard');
+      if (currentNavigation && currentNavigation.page !== 'dashboard') {
+        onNavigate(currentNavigation.page, currentNavigation.params, true);
+      } else {
+        onNavigate('dashboard');
+      }
     } catch (err) {
       console.error(err);
       setError(err.message || 'Authentication failed. Please check your credentials.');

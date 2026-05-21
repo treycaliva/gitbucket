@@ -1141,7 +1141,7 @@ func testMergeBlockedByMissingCodeownerApproval(cfg Config, token string) error 
 
 	// CODEOWNERS file must exist on the target branch (main) before the PR is
 	// opened so that resolveCodeOwnersForPR records the codeowner usernames.
-	codeOwnerUsername := "e2e-codeowner-" + randomHex(3)
+	codeOwnerUsername := "e2e-co-" + randomHex(3)
 	codeOwnerUID := "e2e_codeowner_" + randomHex(3)
 	if err := testUserRegistration(cfg.BaseURL, codeOwnerUID, codeOwnerUsername); err != nil {
 		return fmt.Errorf("register codeowner: %v", err)
@@ -1188,7 +1188,7 @@ func testMergeBlockedByMissingCodeownerApproval(cfg Config, token string) error 
 func testMergeSucceedsAfterCodeownerApproval(cfg Config, token string) error {
 	repoName := "e2e-bp-merge-ok-" + randomHex(3)
 
-	codeOwnerUsername := "e2e-codeowner-ok-" + randomHex(3)
+	codeOwnerUsername := "e2e-cook-" + randomHex(3)
 	codeOwnerUID := "e2e_codeowner_ok_" + randomHex(3)
 	if err := testUserRegistration(cfg.BaseURL, codeOwnerUID, codeOwnerUsername); err != nil {
 		return fmt.Errorf("register codeowner: %v", err)

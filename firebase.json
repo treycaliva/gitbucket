@@ -3,5 +3,22 @@
     "providers": {
       "emailPassword": true
     }
+  },
+  "hosting": {
+    "public": "frontend/dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "gitbucket",
+          "region": "us-central1"
+        }
+      }
+    ]
   }
 }

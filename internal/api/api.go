@@ -507,6 +507,7 @@ func (h *APIHandler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 
 	meta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("[UpdateRepository] GetRepositoryMetadata(%s/%s) failed: %v", owner, repo, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -548,8 +549,14 @@ func (h *APIHandler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(updates) > 0 {
+		updateKeys := make([]string, 0, len(updates))
+		for k := range updates {
+			updateKeys = append(updateKeys, k)
+		}
+		log.Printf("[UpdateRepository] updating %s/%s with keys=%v", owner, repo, updateKeys)
 		err = db.UpdateRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo, updates)
 		if err != nil {
+			log.Printf("[UpdateRepository] UpdateRepositoryMetadata(%s/%s) failed: %v", owner, repo, err)
 			http.Error(w, fmt.Sprintf("Failed to update repository settings: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -558,6 +565,7 @@ func (h *APIHandler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 	// Fetch updated metadata and return it
 	updatedMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {
+		log.Printf("[UpdateRepository] GetRepositoryMetadata(%s/%s) after-update failed: %v", owner, repo, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -489,20 +489,18 @@ select.text-input {
   display: flex;
   border-bottom: 1px solid var(--border-color);
   margin-bottom: 1.5rem;
-  gap: 0.35rem;
+  gap: 1.5rem;
 }
 .tab {
   background: transparent;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-top-left-radius: 8px;
-  border-top-right-radius: 8px;
-  padding: 0.65rem 1.25rem;
-  font-weight: 600;
-  font-size: 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.75rem 0.25rem;
+  font-weight: 500;
+  font-size: 0.95rem;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.15s ease;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -511,14 +509,10 @@ select.text-input {
 }
 .tab:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.03);
 }
 .tab.active {
-  color: var(--text-primary);
-  background: rgba(30, 41, 59, 0.4); /* slate/navy glassmorphism background */
-  border-color: var(--border-color);
-  border-bottom: 1px solid var(--bg-app); /* integrates with the content area background */
-  box-shadow: inset 0 2px 0 0 var(--accent); /* top highlight line */
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
 }
 
 /* Page Headers */
@@ -831,3 +825,40 @@ select.text-input {
   font-size: 0.875rem;
   color: var(--text-secondary);
 }
+
+/* Premium UI Form Element Enhancements */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.2s ease;
+}
+.btn-ghost:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.btn-ghost:active {
+  transform: scale(0.97);
+}
+
+option {
+  background-color: #0f172a;
+  color: var(--text-primary);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
