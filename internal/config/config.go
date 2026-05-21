@@ -13,6 +13,7 @@ type Config struct {
 	RestrictedIP   string
 	ProjectID      string
 	LocalReposRoot string
+	KMSKeyName     string
 }
 
 // Load loads the configuration from environment variables.
@@ -44,6 +45,11 @@ func Load() *Config {
 		localReposRoot = "/tmp/repos"
 	}
 
+	kmsKeyName := os.Getenv("KMS_KEY_NAME")
+	if kmsKeyName == "" {
+		kmsKeyName = os.Getenv("KMS_KEK_NAME")
+	}
+
 	return &Config{
 		Port:           port,
 		GCSBucket:      os.Getenv("GCS_BUCKET"),
@@ -51,5 +57,6 @@ func Load() *Config {
 		RestrictedIP:   restrictedIP,
 		ProjectID:      projectID,
 		LocalReposRoot: localReposRoot,
+		KMSKeyName:     kmsKeyName,
 	}
 }

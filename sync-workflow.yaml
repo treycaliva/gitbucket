@@ -1,0 +1,45 @@
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - owner: ${args.owner}
+          - repo: ${args.repo}
+          - direction: ${args.direction}
+          - force: ${default(args.force, false)}
+          - target_url: ${default(args.target_url, "https://gitbucket-7874554476.us-central1.run.app/api/tasks/sync-github")}
+    - triggerSync:
+        try:
+          call: http.post
+          args:
+            url: ${target_url}
+            auth:
+              type: OIDC
+            body:
+              owner: ${owner}
+              repo: ${repo}
+              direction: ${direction}
+              force: ${force}
+          result: syncResponse
+        retry:
+          predicate: ${custom_retry_predicate}
+          max_retries: 5
+          backoff:
+            initial_delay: 2
+            max_delay: 60
+            multiplier: 2
+    - complete:
+        return: ${syncResponse.body}
+
+custom_retry_predicate:
+  params: [e]
+  steps:
+    - check_status:
+        switch:
+          - condition: ${e.code == 409 or e.code == 429 or e.code >= 500}
+            next: should_retry
+        next: no_retry
+    - should_retry:
+        return: true
+    - no_retry:
+        return: false

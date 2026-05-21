@@ -14,6 +14,7 @@ import (
 
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
+	"gitbucket/internal/sync"
 )
 
 func TestGitAndRepositoryAPIs(t *testing.T) {
@@ -23,6 +24,8 @@ func TestGitAndRepositoryAPIs(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	os.Setenv("DEV_MODE", "true")
+	defer os.Unsetenv("DEV_MODE")
 	client, err := db.NewClient(ctx, "git-bucket-79382")
 	if err != nil {
 		t.Fatalf("failed to create db client: %v", err)
@@ -37,7 +40,7 @@ func TestGitAndRepositoryAPIs(t *testing.T) {
 	defer os.RemoveAll(tempReposRoot)
 
 	authHandler := auth.NewAuthHandler(true, nil, client)
-	apiHandler := NewAPIHandler(client, nil, "", tempReposRoot, authHandler)
+	apiHandler := NewAPIHandler(client, nil, "", tempReposRoot, authHandler, sync.NewKMSClient(nil, ""))
 
 	r := chi.NewRouter()
 	apiHandler.RegisterRoutes(r)
@@ -240,6 +243,15 @@ func TestGitAndRepositoryAPIs(t *testing.T) {
 	r.ServeHTTP(rrGitPushRefsWrong, reqGitPushRefsWrong)
 	if rrGitPushRefsWrong.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 Unauthorized for git refs push with wrong user, got %d", rrGitPushRefsWrong.Code)
+	}
+
+	// 6f. Private clone info/refs (GCB runner OIDC auth -> 200 OK)
+	reqGitPrivRefsOidc := httptest.NewRequest("GET", "/r/"+username+"/privrepo-"+suffix+".git/info/refs?service=git-upload-pack", nil)
+	reqGitPrivRefsOidc.Header.Set("Authorization", "Bearer mock_gcb_token")
+	rrGitPrivRefsOidc := httptest.NewRecorder()
+	r.ServeHTTP(rrGitPrivRefsOidc, reqGitPrivRefsOidc)
+	if rrGitPrivRefsOidc.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for GCB runner OIDC git clone, got %d (body: %s)", rrGitPrivRefsOidc.Code, rrGitPrivRefsOidc.Body.String())
 	}
 
 	// 7. Delete repository

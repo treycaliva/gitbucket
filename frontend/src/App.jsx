@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import Repository from './pages/Repository';
 import CommitDetail from './pages/CommitDetail';
 import Tokens from './pages/Tokens';
+import BuildLogs from './pages/BuildLogs';
 
 const parseLocation = () => {
   const path = window.location.pathname;
@@ -61,7 +62,21 @@ const parseLocation = () => {
     };
   }
 
-  // 5. Commit Detail
+  // 5. Build Logs Console
+  // Pattern: /:owner/:repo/commit/:sha/builds/:buildId
+  if (segments.length === 6 && segments[2] === 'commit' && segments[4] === 'builds') {
+    return {
+      page: 'build_logs',
+      params: {
+        owner: segments[0],
+        repo: segments[1],
+        sha: segments[3],
+        buildId: segments[5]
+      }
+    };
+  }
+
+  // 6. Commit Detail
   // Pattern: /:owner/:repo/commit/:sha
   if (segments.length === 4 && segments[2] === 'commit') {
     return {
@@ -149,6 +164,9 @@ export default function App() {
     } else if (page === 'commit') {
       const { owner, repo, sha } = params;
       url = `/${owner}/${repo}/commit/${sha}`;
+    } else if (page === 'build_logs') {
+      const { owner, repo, sha, buildId } = params;
+      url = `/${owner}/${repo}/commit/${sha}/builds/${buildId}`;
     } else if (page === 'pulls') {
       const { owner, repo } = params;
       url = `/${owner}/${repo}/pulls`;
@@ -194,7 +212,7 @@ export default function App() {
 
   // Render correct view based on navigation state
   const renderView = () => {
-    if (!user) return <Login onNavigate={navigate} />;
+    if (!user) return <Login onNavigate={navigate} currentNavigation={navigation} />;
 
     switch (navigation.page) {
       case 'dashboard':
@@ -218,6 +236,17 @@ export default function App() {
             repo={navigation.params.repo} 
             sha={navigation.params.sha} 
             onNavigate={navigate} 
+          />
+        );
+      case 'build_logs':
+        return (
+          <BuildLogs
+            user={user}
+            owner={navigation.params.owner}
+            repo={navigation.params.repo}
+            sha={navigation.params.sha}
+            buildId={navigation.params.buildId}
+            onNavigate={navigate}
           />
         );
       case 'tokens':

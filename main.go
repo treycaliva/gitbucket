@@ -17,11 +17,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"google.golang.org/api/option"
 
+	kms "cloud.google.com/go/kms/apiv1"
+
 	"gitbucket/internal/api"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/config"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
+	"gitbucket/internal/sync"
 )
 
 func getClientIP(r *http.Request) string {
@@ -137,10 +140,18 @@ func main() {
 			log.Fatalf("failed to initialize GCS client: %v", err)
 		}
 		defer storageClient.Close()
-		log.Printf("GCS client initialized for bucket %s", cfg.GCSBucket)
-	} else {
-		log.Println("Warning: GCSBucket is empty, GCS client not initialized")
 	}
+	// Initialize Cloud KMS client if configured and not in dev mode
+	var kmsKeyMgmtClient *kms.KeyManagementClient
+	if cfg.KMSKeyName != "" && !cfg.DevMode {
+		kmsKeyMgmtClient, err = kms.NewKeyManagementClient(ctx)
+		if err != nil {
+			log.Fatalf("failed to initialize Cloud KMS client: %v", err)
+		}
+		defer kmsKeyMgmtClient.Close()
+		log.Printf("Cloud KMS client initialized for key: %s", cfg.KMSKeyName)
+	}
+	syncKMSClient := sync.NewKMSClient(kmsKeyMgmtClient, cfg.KMSKeyName)
 
 	// Initialize Auth Handler
 	authHandler := auth.NewAuthHandler(cfg.DevMode, authClient, firestoreClient)
@@ -152,7 +163,7 @@ func main() {
 	r.Use(corsMiddleware)
 
 	// API Routes
-	apiHandler := api.NewAPIHandler(firestoreClient, storageClient, cfg.GCSBucket, cfg.LocalReposRoot, authHandler)
+	apiHandler := api.NewAPIHandler(firestoreClient, storageClient, cfg.GCSBucket, cfg.LocalReposRoot, authHandler, syncKMSClient)
 	apiHandler.RegisterRoutes(r)
 
 	// Static Assets & SPA Fallback

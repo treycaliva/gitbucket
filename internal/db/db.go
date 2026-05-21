@@ -130,19 +130,30 @@ type Collaborator struct {
 	AddedBy  string    `json:"addedBy" firestore:"addedBy"`
 }
 
+// GitHubSyncConfig represents the synchronization settings for GitHub.
+type GitHubSyncConfig struct {
+	Enabled      bool      `json:"enabled" firestore:"enabled"`
+	GitHubRepo   string    `json:"githubRepo" firestore:"githubRepo"` // e.g. "owner/repo"
+	Direction    string    `json:"direction" firestore:"direction"`   // "mirror-to-github" | "mirror-to-gitbucket" | "bidirectional"
+	SyncStatus   string    `json:"syncStatus" firestore:"syncStatus"` // "synced" | "syncing" | "conflict" | "error"
+	LastSyncedAt time.Time `json:"lastSyncedAt" firestore:"lastSyncedAt"`
+	ErrorMessage string    `json:"errorMessage" firestore:"errorMessage"`
+}
+
 // RepositoryMetadata holds repository details.
 type RepositoryMetadata struct {
-	OwnerUID               string         `json:"ownerUid" firestore:"ownerUid"`
-	Owner                  string         `json:"owner" firestore:"owner"`
-	Name                   string         `json:"name" firestore:"name"`
-	Description            string         `json:"description" firestore:"description"`
-	Visibility             string         `json:"visibility" firestore:"visibility"`
-	DefaultBranch          string         `json:"defaultBranch" firestore:"defaultBranch"`
-	CreatedAt              time.Time      `json:"createdAt" firestore:"createdAt"`
-	UpdatedAt              time.Time      `json:"updatedAt" firestore:"updatedAt"`
-	Branches               []string       `json:"branches" firestore:"branches"`
-	AutoDeleteHeadBranches bool           `json:"autoDeleteHeadBranches" firestore:"autoDeleteHeadBranches"`
-	Collaborators          []Collaborator `json:"collaborators" firestore:"collaborators"`
+	OwnerUID               string           `json:"ownerUid" firestore:"ownerUid"`
+	Owner                  string           `json:"owner" firestore:"owner"`
+	Name                   string           `json:"name" firestore:"name"`
+	Description            string           `json:"description" firestore:"description"`
+	Visibility             string           `json:"visibility" firestore:"visibility"`
+	DefaultBranch          string           `json:"defaultBranch" firestore:"defaultBranch"`
+	CreatedAt              time.Time        `json:"createdAt" firestore:"createdAt"`
+	UpdatedAt              time.Time        `json:"updatedAt" firestore:"updatedAt"`
+	Branches               []string         `json:"branches" firestore:"branches"`
+	AutoDeleteHeadBranches bool             `json:"autoDeleteHeadBranches" firestore:"autoDeleteHeadBranches"`
+	Collaborators          []Collaborator   `json:"collaborators" firestore:"collaborators"`
+	GitHubSync             GitHubSyncConfig `json:"githubSync" firestore:"githubSync"`
 }
 
 // MapToRepositoryMetadata converts a Firestore document data map to RepositoryMetadata.
@@ -208,6 +219,16 @@ func MapToRepositoryMetadata(m map[string]interface{}) *RepositoryMetadata {
 			}
 			meta.Collaborators = append(meta.Collaborators, collab)
 		}
+	}
+	if val, ok := m["githubSync"].(map[string]interface{}); ok {
+		meta.GitHubSync.Enabled, _ = val["enabled"].(bool)
+		meta.GitHubSync.GitHubRepo, _ = val["githubRepo"].(string)
+		meta.GitHubSync.Direction, _ = val["direction"].(string)
+		meta.GitHubSync.SyncStatus, _ = val["syncStatus"].(string)
+		if t, ok := val["lastSyncedAt"].(time.Time); ok {
+			meta.GitHubSync.LastSyncedAt = t
+		}
+		meta.GitHubSync.ErrorMessage, _ = val["errorMessage"].(string)
 	}
 	return meta
 }
