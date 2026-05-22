@@ -1,0 +1,21 @@
+[
+  {
+    "type": "file",
+    "size": 120,
+    "name": "main.go",
+    "path": "src/main.go",
+    "sha": "sha-of-main",
+    "url": "https://gitbucket.example.com/api/v3/repos/alice/demo/contents/src/main.go?ref=main",
+    "html_url": "https://gitbucket.example.com/alice/demo/blob/main/src/main.go",
+    "download_url": "https://gitbucket.example.com/alice/demo/raw/main/src/main.go"
+  },
+  {
+    "type": "dir",
+    "size": 0,
+    "name": "helpers",
+    "path": "src/helpers",
+    "sha": "sha-of-helpers",
+    "url": "https://gitbucket.example.com/api/v3/repos/alice/demo/contents/src/helpers?ref=main",
+    "html_url": "https://gitbucket.example.com/alice/demo/blob/main/src/helpers"
+  }
+]

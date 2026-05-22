@@ -22,6 +22,7 @@ import (
 	"google.golang.org/api/option"
 
 	"gitbucket/internal/api"
+	v3 "gitbucket/internal/api/v3"
 	"gitbucket/internal/apps"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/config"
@@ -29,6 +30,15 @@ import (
 	"gitbucket/internal/gcs"
 	"gitbucket/internal/sync"
 )
+
+// baseURL returns the configured public base URL for v3 URL generation.
+// Falls back to http://localhost:<port> for dev mode.
+func baseURL(cfg *config.Config) string {
+	if v := os.Getenv("PUBLIC_BASE_URL"); v != "" {
+		return v
+	}
+	return "http://localhost:" + cfg.Port
+}
 
 func getClientIP(r *http.Request) string {
 	xff := r.Header.Get("X-Forwarded-For")
@@ -225,6 +235,13 @@ func main() {
 	appsJWTVerifier := apps.NewJWTVerifier(firestoreClient, 60*time.Second)
 	appsHandler := apps.NewHandler(firestoreClient, appsSecretStore, appsJWTVerifier)
 	apps.RegisterRoutes(r, appsHandler)
+
+	// GitHub-shape REST surface (/api/v3/*, installation-token authed).
+	v3Handler := v3.NewV3Handler(firestoreClient, storageClient, baseURL(cfg))
+	if v3Handler.LocalReposRoot == "" {
+		v3Handler.LocalReposRoot = cfg.LocalReposRoot
+	}
+	v3.RegisterV3Routes(r, v3Handler)
 
 	// Static Assets & SPA Fallback
 	staticDir := "frontend/dist"
