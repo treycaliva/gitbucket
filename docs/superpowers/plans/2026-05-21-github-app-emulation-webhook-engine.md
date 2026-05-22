@@ -83,15 +83,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 # verifies the audience matches its own URL.
 ```
 
-Plus the Plan 1 Firestore TTL config still applies; webhook_deliveries also gets a TTL:
+Plus the Plan 1 Firestore TTL config still applies; webhook_deliveries TTL is a follow-on:
 
 ```bash
-gcloud firestore fields ttls update created_at \
-    --collection-group=webhook_deliveries \
-    --enable-ttl
+# Webhook delivery records retention: deferred to a follow-on. To enable later,
+# add an `expires_at` field to WebhookDelivery (e.g. set to `created_at + 30d`
+# in CreateDelivery) and configure TTL on that field:
+#
+#   gcloud firestore fields ttls update expires_at \
+#       --collection-group=webhook_deliveries \
+#       --enable-ttl
 ```
-
-(With ~30 day retention via the field's natural age.)
 
 ---
 
