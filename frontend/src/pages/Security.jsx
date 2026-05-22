@@ -122,6 +122,7 @@ export default function Security({ user }) {
       if (err.code === 'auth/invalid-verification-code') {
         setError('That code did not match. Try again with a fresh code from your app.');
       } else if (err.code === 'auth/requires-recent-login') {
+        handleCancelEnroll();
         setError('Please sign out and sign in again before enrolling two-factor authentication.');
       } else {
         setError(err.message || 'Enrollment failed.');
