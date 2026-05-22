@@ -266,7 +266,8 @@ func main() {
 
 	// GitHub App emulation routes (Plan 1: JWT-authed App endpoints only).
 	appsJWTVerifier := apps.NewJWTVerifier(firestoreClient, 60*time.Second)
-	appsHandler := apps.NewHandler(firestoreClient, appsSecretStore, appsJWTVerifier)
+	appsHandler := apps.NewHandler(firestoreClient, appsSecretStore, appsJWTVerifier, authHandler)
+	appsHandler.Events = fireDeps
 	apps.RegisterRoutes(r, appsHandler)
 
 	// GitHub-shape REST surface (/api/v3/*, installation-token authed).

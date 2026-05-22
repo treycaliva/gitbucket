@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -92,6 +93,39 @@ func (h *AuthHandler) RequireWebAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// RequireUID extracts and verifies the request's authentication, returning
+// the UID or an error. Used by handlers that need to gate by web auth
+// (Firebase ID token or DevMode mock_<uid> token) without being in the
+// RequireWebAuth middleware chain.
+func (h *AuthHandler) RequireUID(r *http.Request) (string, error) {
+	// Check if already set by middleware.
+	if uid := GetUID(r.Context()); uid != "" {
+		return uid, nil
+	}
+	// Parse Authorization header directly.
+	authHeader := r.Header.Get("Authorization")
+	var tok string
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tok = authHeader[7:]
+	} else if strings.HasPrefix(authHeader, "bearer ") {
+		tok = authHeader[7:]
+	}
+	if tok == "" {
+		return "", fmt.Errorf("missing bearer token")
+	}
+	if h.DevMode && strings.HasPrefix(tok, "mock_") {
+		return strings.TrimPrefix(tok, "mock_"), nil
+	}
+	if h.FirebaseAuth == nil {
+		return "", fmt.Errorf("auth client not configured")
+	}
+	verifiedToken, err := h.FirebaseAuth.VerifyIDToken(r.Context(), tok)
+	if err != nil {
+		return "", err
+	}
+	return verifiedToken.UID, nil
 }
 
 // OptionalWebAuth is a middleware that optionally authenticates the token (Bearer or mock).

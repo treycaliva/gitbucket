@@ -12,17 +12,20 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"gitbucket/internal/api/v3/v3fmt"
+	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 )
 
 type Handler struct {
-	FS    *firestore.Client
-	Store SecretStore
-	JWT   *JWTVerifier
+	FS     *firestore.Client
+	Store  SecretStore
+	JWT    *JWTVerifier
+	Auth   *auth.AuthHandler // for web-authed manifest endpoints
+	Events FireDeps
 }
 
-func NewHandler(fs *firestore.Client, store SecretStore, jwt *JWTVerifier) *Handler {
-	return &Handler{FS: fs, Store: store, JWT: jwt}
+func NewHandler(fs *firestore.Client, store SecretStore, jwt *JWTVerifier, authH *auth.AuthHandler) *Handler {
+	return &Handler{FS: fs, Store: store, JWT: jwt, Auth: authH}
 }
 
 // --- Handlers --------------------------------------------------------------
