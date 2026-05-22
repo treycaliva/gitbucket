@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"gitbucket/internal/apps"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -57,13 +59,9 @@ type GitHubPushPayload struct {
 	Commits    []WebhookCommit `json:"commits"`
 }
 
-// List of known bot accounts and sync identities
-var knownSyncIdentities = map[string]bool{
-	"gitbucket-sync-bot":      true,
-	"gitbucket-sync-bot[bot]": true,
-	"jules-sync-bot":          true,
-	"github-actions[bot]":     true,
-}
+// knownSyncIdentities was a hardcoded map; bot identity is now sourced from
+// apps.IsBotIdentity which reads from a Firestore-backed cache seeded with
+// the same baseline names. See internal/apps/bot_identity.go.
 
 // VerifyGitHubSignature verifies the HMAC-SHA256 signature from GitHub webhook.
 func VerifyGitHubSignature(r *http.Request, secret []byte) bool {
@@ -124,8 +122,8 @@ func (h *APIHandler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 1. Loop prevention check against sender and pusher
-	if knownSyncIdentities[strings.ToLower(payload.Sender.Login)] ||
-		knownSyncIdentities[strings.ToLower(payload.Pusher.Name)] {
+	if apps.IsBotIdentity(r.Context(), payload.Sender.Login) ||
+		apps.IsBotIdentity(r.Context(), payload.Pusher.Name) {
 		log.Printf("[Webhook] Discarding webhook due to sync bot sender/pusher identity: %s/%s", payload.Sender.Login, payload.Pusher.Name)
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -133,8 +131,8 @@ func (h *APIHandler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request)
 
 	// 2. Loop prevention check against head commit
 	if payload.HeadCommit != nil {
-		if knownSyncIdentities[strings.ToLower(payload.HeadCommit.Author.Username)] ||
-			knownSyncIdentities[strings.ToLower(payload.HeadCommit.Committer.Username)] {
+		if apps.IsBotIdentity(r.Context(), payload.HeadCommit.Author.Username) ||
+			apps.IsBotIdentity(r.Context(), payload.HeadCommit.Committer.Username) {
 			log.Printf("[Webhook] Discarding webhook due to sync bot head commit author/committer identity")
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -148,8 +146,8 @@ func (h *APIHandler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request)
 
 	// 3. Loop prevention check against all commits
 	for _, commit := range payload.Commits {
-		if knownSyncIdentities[strings.ToLower(commit.Author.Username)] ||
-			knownSyncIdentities[strings.ToLower(commit.Committer.Username)] {
+		if apps.IsBotIdentity(r.Context(), commit.Author.Username) ||
+			apps.IsBotIdentity(r.Context(), commit.Committer.Username) {
 			log.Printf("[Webhook] Discarding webhook due to sync bot commit author/committer identity: %s/%s", commit.Author.Username, commit.Committer.Username)
 			w.WriteHeader(http.StatusNoContent)
 			return

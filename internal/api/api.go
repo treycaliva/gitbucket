@@ -38,6 +38,7 @@ type APIHandler struct {
 	LocalReposRoot  string
 	AuthHandler     *auth.AuthHandler
 	KMSClient       *sync.KMSClient
+	Events          apps.FireDeps // populated by main.go after construction
 }
 
 // NewAPIHandler creates a new APIHandler.

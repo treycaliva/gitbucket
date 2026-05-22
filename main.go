@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	"cloud.google.com/go/firestore"
 	kms "cloud.google.com/go/kms/apiv1"
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
@@ -23,6 +24,7 @@ import (
 
 	"gitbucket/internal/api"
 	v3 "gitbucket/internal/api/v3"
+	"gitbucket/internal/api/v3/v3fmt"
 	"gitbucket/internal/apps"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/config"
@@ -217,6 +219,36 @@ func main() {
 		log.Printf("apps: Secret Manager client initialized for project %s", cfg.SecretManagerProject)
 	}
 
+	// Plan 3: webhook engine initialization.
+	appsSecretCache := apps.NewWebhookSecretCache(appsSecretStore, 5*time.Minute)
+
+	var appsEnqueuer apps.TaskEnqueuer
+	if cfg.DevMode || cfg.CloudTasksQueueName == "" {
+		appsEnqueuer = apps.NewMemoryEnqueuer()
+		log.Println("apps: using in-memory TaskEnqueuer (DEV_MODE or no queue configured)")
+	} else {
+		ctClient, err := cloudtasks.NewClient(ctx)
+		if err != nil {
+			log.Fatalf("failed to initialize Cloud Tasks client: %v", err)
+		}
+		defer ctClient.Close()
+		appsEnqueuer = apps.NewRealEnqueuer(ctClient, cfg.CloudTasksQueueName, cfg.DispatcherOIDCSA, cfg.DispatcherOIDCAudience)
+		log.Printf("apps: Cloud Tasks enqueuer initialized for queue %s", cfg.CloudTasksQueueName)
+	}
+
+	fireDeps := apps.FireDeps{
+		FS:          firestoreClient,
+		Enqueuer:    appsEnqueuer,
+		SecretCache: appsSecretCache,
+		URLs:        v3fmt.NewURLBuilder(baseURL(cfg)),
+		DispatchURL: baseURL(cfg) + "/_internal/dispatch-webhook",
+	}
+
+	// Start bot identity refresher.
+	botCache := apps.NewBotIdentityCache(firestoreClient, 60*time.Second)
+	apps.SetDefaultBotIdentityCache(botCache)
+	botCache.Start(ctx)
+
 	// Initialize Auth Handler
 	authHandler := auth.NewAuthHandler(cfg.DevMode, authClient, firestoreClient)
 
@@ -229,6 +261,7 @@ func main() {
 
 	// API Routes
 	apiHandler := api.NewAPIHandler(firestoreClient, storageClient, cfg.GCSBucket, cfg.LocalReposRoot, authHandler, syncKMSClient)
+	apiHandler.Events = fireDeps
 	apiHandler.RegisterRoutes(r)
 
 	// GitHub App emulation routes (Plan 1: JWT-authed App endpoints only).
@@ -238,17 +271,24 @@ func main() {
 
 	// GitHub-shape REST surface (/api/v3/*, installation-token authed).
 	v3Handler := v3.NewV3Handler(firestoreClient, storageClient, baseURL(cfg))
+	v3Handler.Events = fireDeps
 	if v3Handler.LocalReposRoot == "" {
 		v3Handler.LocalReposRoot = cfg.LocalReposRoot
 	}
 	v3.RegisterV3Routes(r, v3Handler)
+
+	// Plan 3: dispatcher endpoint for Cloud Tasks → App webhook fan-out.
+	dispatcher := apps.NewDispatcherHandler(firestoreClient, cfg.DispatcherOIDCAudience)
+	r.Post("/_internal/dispatch-webhook/{id}", dispatcher.Dispatch)
 
 	// Static Assets & SPA Fallback
 	staticDir := "frontend/dist"
 	fs := http.FileServer(http.Dir(staticDir))
 
 	r.HandleFunc("/*", func(w http.ResponseWriter, req *http.Request) {
-		if strings.HasPrefix(req.URL.Path, "/api/") || strings.HasPrefix(req.URL.Path, "/r/") {
+		if strings.HasPrefix(req.URL.Path, "/api/") ||
+			strings.HasPrefix(req.URL.Path, "/r/") ||
+			strings.HasPrefix(req.URL.Path, "/_internal/") {
 			http.NotFound(w, req)
 			return
 		}

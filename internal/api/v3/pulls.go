@@ -1,6 +1,7 @@
 package v3
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -89,13 +90,28 @@ func (h *V3Handler) CreatePull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	botLogin := "app-" + ic.AppID + "[bot]"
+	botLogin := ic.AppSlug + "[bot]"
+	if ic.AppSlug == "" {
+		botLogin = "app-" + ic.AppID + "[bot]"
+	}
 	pr, err := db.CreatePullRequest(r.Context(), h.FirestoreClient, owner, repo,
 		req.Title, req.Body, req.Head, req.Base, ic.BotUserID, botLogin)
 	if err != nil {
 		apps.WriteError(w, apps.ErrUnprocessable)
 		return
 	}
+	apps.Fire(r.Context(), h.Events, apps.PullRequestPayload{
+		Action:     "opened",
+		Number:     pr.Number,
+		Title:      pr.Title,
+		Body:       pr.Description,
+		State:      "open",
+		HeadBranch: pr.SourceBranch,
+		BaseBranch: pr.TargetBranch,
+		OwnerLogin: owner,
+		RepoName:   repo,
+		Sender:     senderFromCtx(r.Context()),
+	})
 	apps.WriteJSON(w, http.StatusCreated, pullToFormatter(*pr, owner, repo, h.URLs))
 }
 
@@ -145,7 +161,45 @@ func (h *V3Handler) UpdatePull(w http.ResponseWriter, r *http.Request) {
 		apps.WriteError(w, apps.ErrNotFound)
 		return
 	}
+	action := "edited"
+	if req.State == "closed" {
+		action = "closed"
+	} else if req.State == "open" {
+		action = "reopened"
+	}
+	apps.Fire(r.Context(), h.Events, apps.PullRequestPayload{
+		Action:     action,
+		Number:     pr.Number,
+		Title:      pr.Title,
+		Body:       pr.Description,
+		State:      pr.Status, // "open" | "closed" | "merged"
+		HeadBranch: pr.SourceBranch,
+		BaseBranch: pr.TargetBranch,
+		OwnerLogin: owner,
+		RepoName:   repo,
+		Sender:     senderFromCtx(r.Context()),
+	})
 	apps.WriteJSON(w, http.StatusOK, pullToFormatter(*pr, owner, repo, h.URLs))
+}
+
+// senderFromCtx derives a SenderRef from the installation context. The
+// actor on any v3 write is the App's bot user. The Login matches the bot
+// user's registered username ("<slug>[bot]") so that IsBotIdentity loop
+// prevention correctly recognises App-initiated events.
+func senderFromCtx(ctx context.Context) apps.SenderRef {
+	ic := apps.InstallationContextFrom(ctx)
+	if ic == nil {
+		return apps.SenderRef{Login: "unknown", Type: "User"}
+	}
+	botLogin := ic.AppSlug + "[bot]"
+	if ic.AppSlug == "" {
+		// Defensive fallback for tests that build an InstallationContext directly.
+		botLogin = "app-" + ic.AppID + "[bot]"
+	}
+	return apps.SenderRef{
+		Login: botLogin,
+		Type:  "Bot",
+	}
 }
 
 // pullToFormatter translates db.PullRequest → v3fmt.PullRequestDTO.
