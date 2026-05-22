@@ -133,6 +133,7 @@ func (h *Handler) CreateManifestApp(w http.ResponseWriter, r *http.Request) {
 	// 7. Stash the secrets bundle keyed by a one-time code.
 	code, err := CreateManifestConversion(r.Context(), h.FS, app.AppID)
 	if err != nil {
+		cleanupOrphanedApp(r.Context(), h.FS, app, slug, botUID)
 		WriteError(w, err)
 		return
 	}
@@ -140,6 +141,9 @@ func (h *Handler) CreateManifestApp(w http.ResponseWriter, r *http.Request) {
 	// without re-running key generation. We piggyback on a sibling doc in a
 	// short-lived subcollection so the Code doc itself stays small.
 	if err := stashConversionSecrets(r.Context(), h.FS, code, secrets); err != nil {
+		cleanupOrphanedApp(r.Context(), h.FS, app, slug, botUID)
+		// Also delete the conversion code we just created so it can't be exchanged.
+		_, _ = h.FS.Collection(CollectionManifestConversions).Doc(code).Delete(r.Context())
 		WriteError(w, err)
 		return
 	}
@@ -321,9 +325,13 @@ func appendCodeQuery(redirectURL, code string) string {
 
 // --- conversion secrets stash --------------------------------------------
 
-// conversionSecretsDoc is stored as Firestore: manifest_conversions/{code}/secrets/v1
-// Same 10-minute TTL on the parent code applies (TTL deletes the code; we
-// also delete the secrets sibling on ConsumeManifestConversion).
+// conversionSecretsDoc is stored as Firestore: manifest_conversions/{code}/secrets/v1.
+// IMPORTANT: Firestore TTL on manifest_conversions does NOT cascade to this
+// subcollection. The doc is deleted by loadConversionSecrets on a successful
+// hop-3 exchange. Codes that expire un-exchanged leave the secrets doc
+// orphaned (unreachable without the code, but present). A periodic sweeper
+// is tracked as a follow-on; until then, this is a known credential
+// retention gap.
 type conversionSecretsDoc struct {
 	ClientID      string `firestore:"client_id"`
 	ClientSecret  string `firestore:"client_secret"`
@@ -362,4 +370,22 @@ func loadConversionSecrets(ctx context.Context, fs *firestore.Client, code strin
 		WebhookSecret: d.WebhookSecret,
 		PrivateKeyPEM: d.PrivateKeyPEM,
 	}, nil
+}
+
+// cleanupOrphanedApp is a best-effort delete of an App + its bot user when a
+// later step in CreateManifestApp fails (e.g. CreateManifestConversion or
+// stashConversionSecrets errors after CreateApp succeeds). All deletes are
+// best-effort; partial failures are logged via FireError for visibility.
+func cleanupOrphanedApp(ctx context.Context, fs *firestore.Client, app *App, slug, botUID string) {
+	if _, err := fs.Collection(CollectionApps).Doc(app.AppID).Delete(ctx); err != nil {
+		FireError("orphan cleanup: delete app %s: %v", app.AppID, err)
+	}
+	if _, err := fs.Collection("usernames").Doc(slug + "[bot]").Delete(ctx); err != nil {
+		FireError("orphan cleanup: delete username %s[bot]: %v", slug, err)
+	}
+	if botUID != "" {
+		if _, err := fs.Collection(CollectionUsers).Doc(botUID).Delete(ctx); err != nil {
+			FireError("orphan cleanup: delete bot user %s: %v", botUID, err)
+		}
+	}
 }
