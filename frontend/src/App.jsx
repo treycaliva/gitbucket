@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { authService } from './authService';
-import { 
-  Key, 
-  LogOut, 
-  Layers, 
-  Database
+import {
+  Database,
+  Key,
+  Layers,
+  LogOut,
+  Shield
 } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Repository from './pages/Repository';
 import CommitDetail from './pages/CommitDetail';
 import Tokens from './pages/Tokens';
+import Security from './pages/Security';
 import BuildLogs from './pages/BuildLogs';
 
 const parseLocation = () => {
@@ -26,6 +28,11 @@ const parseLocation = () => {
   // 2. Access Tokens
   if (segments.length === 1 && segments[0] === 'tokens') {
     return { page: 'tokens', params: {} };
+  }
+
+  // 2b. Security
+  if (segments.length === 1 && segments[0] === 'security') {
+    return { page: 'security', params: {} };
   }
 
   // 3. Pull Requests List
@@ -148,6 +155,8 @@ export default function App() {
       url = '/';
     } else if (page === 'tokens') {
       url = '/tokens';
+    } else if (page === 'security') {
+      url = '/security';
     } else if (page === 'repository') {
       const { owner, repo, tab, path } = params;
       url = `/${owner}/${repo}`;
@@ -251,6 +260,8 @@ export default function App() {
         );
       case 'tokens':
         return <Tokens user={user} onNavigate={navigate} />;
+      case 'security':
+        return <Security user={user} onNavigate={navigate} />;
       case 'pulls':
         return (
           <Repository 
@@ -305,7 +316,7 @@ export default function App() {
               <Layers size={18} />
               Repositories
             </button>
-            <button 
+            <button
               className={`nav-link btn-secondary ${navigation.page === 'tokens' ? 'active' : ''}`}
               style={{ background: 'none', border: 'none', cursor: 'pointer' }}
               onClick={() => navigate('tokens')}
@@ -313,6 +324,16 @@ export default function App() {
               <Key size={18} />
               Access Tokens
             </button>
+            {!authService.getConfig()?.devMode && (
+              <button
+                className={`nav-link btn-secondary ${navigation.page === 'security' ? 'active' : ''}`}
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => navigate('security')}
+              >
+                <Shield size={18} />
+                Security
+              </button>
+            )}
           </nav>
 
           <div className="user-profile-menu">
