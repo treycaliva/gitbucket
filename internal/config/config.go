@@ -7,13 +7,14 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	Port           string
-	GCSBucket      string
-	DevMode        bool
-	RestrictedIP   string
-	ProjectID      string
-	LocalReposRoot string
-	KMSKeyName     string
+	Port                 string
+	GCSBucket            string
+	DevMode              bool
+	RestrictedIP         string
+	ProjectID            string
+	LocalReposRoot       string
+	KMSKeyName           string
+	SecretManagerProject string
 }
 
 // Load loads the configuration from environment variables.
@@ -50,13 +51,19 @@ func Load() *Config {
 		kmsKeyName = os.Getenv("KMS_KEK_NAME")
 	}
 
+	secretManagerProject := os.Getenv("SECRET_MANAGER_PROJECT")
+	if secretManagerProject == "" {
+		secretManagerProject = projectID
+	}
+
 	return &Config{
-		Port:           port,
-		GCSBucket:      os.Getenv("GCS_BUCKET"),
-		DevMode:        devMode,
-		RestrictedIP:   restrictedIP,
-		ProjectID:      projectID,
-		LocalReposRoot: localReposRoot,
-		KMSKeyName:     kmsKeyName,
+		Port:                 port,
+		GCSBucket:            os.Getenv("GCS_BUCKET"),
+		DevMode:              devMode,
+		RestrictedIP:         restrictedIP,
+		ProjectID:            projectID,
+		LocalReposRoot:       localReposRoot,
+		KMSKeyName:           kmsKeyName,
+		SecretManagerProject: secretManagerProject,
 	}
 }
