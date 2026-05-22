@@ -20,4 +20,7 @@ func RegisterRoutes(r chi.Router, h *Handler) {
 	// ExchangeManifestCode is unauthenticated — the code itself is the credential.
 	r.Post("/api/v3/settings/apps/manifest-conversions", h.CreateManifestApp)
 	r.Post("/api/v3/app-manifests/{code}/conversions", h.ExchangeManifestCode)
+
+	// Plan 4 Task 3: SPA-driven installation endpoint (web auth).
+	r.Post("/api/v3/user/installations", h.CreateUserInstallation)
 }
