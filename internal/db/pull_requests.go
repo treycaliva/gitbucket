@@ -27,6 +27,10 @@ type PullRequest struct {
 	// RequestedReviewers is the set of usernames auto-resolved from CODEOWNERS
 	// on PR open. May be empty if no CODEOWNERS rules matched the diff.
 	RequestedReviewers []string `json:"requestedReviewers" firestore:"requestedReviewers"`
+
+	Mergeable            *bool     `json:"mergeable,omitempty" firestore:"mergeable,omitempty"`
+	LastCheckedSourceSHA string    `json:"lastCheckedSourceSha,omitempty" firestore:"lastCheckedSourceSha,omitempty"`
+	LastCheckedTargetSHA string    `json:"lastCheckedTargetSha,omitempty" firestore:"lastCheckedTargetSha,omitempty"`
 }
 
 // CreatePullRequest transactionally creates a Pull Request and increments the repository's PR counter.
@@ -202,6 +206,27 @@ func UpdatePullRequestTitleBody(ctx context.Context, client *firestore.Client, o
 	if body != "" {
 		updates = append(updates, firestore.Update{Path: "description", Value: body})
 	}
+	_, err := prRef.Update(ctx, updates)
+	return err
+}
+
+// UpdatePullRequestMergeableStatus updates the mergeable, lastCheckedSourceSha, and lastCheckedTargetSha fields of a Pull Request.
+func UpdatePullRequestMergeableStatus(ctx context.Context, client *firestore.Client, owner, repo string, number int, mergeable *bool, sourceSha, targetSha string) error {
+	if client == nil {
+		return fmt.Errorf("firestore client is nil")
+	}
+	repoId := fmt.Sprintf("%s_%s", strings.ToLower(owner), strings.ToLower(repo))
+	prRef := client.Collection("repositories").Doc(repoId).Collection("pulls").Doc(strconv.Itoa(number))
+
+	var updates []firestore.Update
+	if mergeable == nil {
+		updates = append(updates, firestore.Update{Path: "mergeable", Value: firestore.Delete})
+	} else {
+		updates = append(updates, firestore.Update{Path: "mergeable", Value: *mergeable})
+	}
+	updates = append(updates, firestore.Update{Path: "lastCheckedSourceSha", Value: sourceSha})
+	updates = append(updates, firestore.Update{Path: "lastCheckedTargetSha", Value: targetSha})
+
 	_, err := prRef.Update(ctx, updates)
 	return err
 }

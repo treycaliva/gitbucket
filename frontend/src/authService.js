@@ -228,6 +228,10 @@ class AuthService {
       return await this.auth.currentUser.getIdToken();
     }
   }
+
+  getConfig() {
+    return this.config;
+  }
 }
 
 export const authService = new AuthService();

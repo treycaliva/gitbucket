@@ -87,6 +87,8 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Get("/repos/{owner}/{repo}/tree/{branch}/*", h.GetTree)
 			r.Get("/repos/{owner}/{repo}/blob/{branch}/*", h.GetBlob)
 			r.Get("/repos/{owner}/{repo}/codeowners", h.CodeOwnersHandler)
+			r.Get("/repos/{owner}/{repo}/tags", h.ListTags)
+			r.Get("/repos/{owner}/{repo}/refs/{branch}/head", h.GetBranchHead)
 
 			r.Get("/repos/{owner}/{repo}/pulls", h.ListPullRequests)
 			r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPullRequest)
@@ -122,6 +124,7 @@ func (h *APIHandler) RegisterRoutes(r chi.Router) {
 			r.Post("/repos/{owner}/{repo}/pulls", h.CreatePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/merge", h.MergePullRequest)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/close", h.ClosePullRequest)
+			r.Post("/repos/{owner}/{repo}/pulls/{number}/update", h.UpdatePullRequestBranch)
 			r.Post("/repos/{owner}/{repo}/pulls/{number}/reviews", h.SubmitReviewHandler)
 
 			r.Post("/repos/{owner}/{repo}/collaborators", h.AddCollaboratorHandler)
@@ -642,25 +645,22 @@ func (h *APIHandler) DeleteBranch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Verify branch exists
-	if !branchExists(localRepoPath, branch) {
-		http.Error(w, fmt.Sprintf("Branch %q does not exist", branch), http.StatusNotFound)
-		return
-	}
-
-	// 2. Delete branch locally using git
-	_, err = runGit(localRepoPath, "branch", "-D", branch)
-	if err != nil {
-		http.Error(w, "Failed to delete branch: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// 3. Upload to GCS
-	if h.StorageClient != nil && h.BucketName != "" {
-		err = gcs.UploadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+	// If the branch exists locally, delete it and sync back to GCS.
+	// If it doesn't, fall through — the metadata entry is stale and will be
+	// reconciled below when we refresh `branches` from the real repo.
+	if branchExists(localRepoPath, branch) {
+		_, err = runGit(localRepoPath, "branch", "-D", branch)
 		if err != nil {
-			http.Error(w, "Failed to upload repository to GCS: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Failed to delete branch: "+err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		if h.StorageClient != nil && h.BucketName != "" {
+			err = gcs.UploadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+			if err != nil {
+				http.Error(w, "Failed to upload repository to GCS: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
@@ -780,15 +780,79 @@ func (h *APIHandler) authorizeGitRead(w *http.ResponseWriter, r *http.Request, o
 	return meta, localRepoPath, true
 }
 
+// CommitStatus represents a build status.
+type CommitStatus struct {
+	BuildID string `json:"buildId"`
+	Status  string `json:"status"`
+}
+
 // CommitInfo represents basic commit details.
 type CommitInfo struct {
-	SHA         string `json:"sha"`
-	AuthorName  string `json:"authorName"`
-	AuthorEmail string `json:"authorEmail"`
-	Date        string `json:"date"`
-	Message     string `json:"message"`
-	Status      string `json:"status,omitempty"`
-	BuildID     string `json:"buildId,omitempty"`
+	SHA           string         `json:"sha"`
+	AuthorName    string         `json:"authorName"`
+	AuthorEmail   string         `json:"authorEmail"`
+	Date          string         `json:"date"`
+	Message       string         `json:"message"`
+	Status        string         `json:"status,omitempty"`
+	BuildID       string         `json:"buildId,omitempty"`
+	OverallStatus string         `json:"overallStatus,omitempty"`
+	Statuses      []CommitStatus `json:"statuses,omitempty"`
+}
+
+// DecorateCommitsWithStatuses fetches build statuses from Firestore and attaches them to commits.
+func (h *APIHandler) DecorateCommitsWithStatuses(ctx context.Context, owner, repo string, commits []CommitInfo) {
+	if len(commits) == 0 {
+		return
+	}
+	statusQuery := h.FirestoreClient.Collection("commit_statuses").
+		Where("owner", "==", owner).
+		Where("repo", "==", repo)
+	statusDocs, err := statusQuery.Documents(ctx).GetAll()
+	if err != nil {
+		log.Printf("DecorateCommitsWithStatuses: Firestore query failed: %v", err)
+		return
+	}
+	shaToStatus := make(map[string]map[string]interface{})
+	for _, doc := range statusDocs {
+		var data map[string]interface{}
+		if err := doc.DataTo(&data); err == nil {
+			sha, _ := data["sha"].(string)
+			if sha != "" {
+				existing, exists := shaToStatus[sha]
+				if !exists {
+					shaToStatus[sha] = data
+				} else {
+					var curCreated, newCreated time.Time
+					if t, ok := existing["createdAt"].(time.Time); ok {
+						curCreated = t
+					}
+					if t, ok := data["createdAt"].(time.Time); ok {
+						newCreated = t
+					}
+					if newCreated.After(curCreated) {
+						shaToStatus[sha] = data
+					}
+				}
+			}
+		}
+	}
+	for i := range commits {
+		if statusData, ok := shaToStatus[commits[i].SHA]; ok {
+			statusVal, _ := statusData["status"].(string)
+			buildIDVal, _ := statusData["buildId"].(string)
+			commits[i].Status = statusVal
+			commits[i].BuildID = buildIDVal
+			commits[i].OverallStatus = statusVal
+			if buildIDVal != "" {
+				commits[i].Statuses = []CommitStatus{
+					{
+						BuildID: buildIDVal,
+						Status:  statusVal,
+					},
+				}
+			}
+		}
+	}
 }
 
 // GetCommitHistory handles GET /api/repos/{owner}/{repo}/commits/{branch}
@@ -809,8 +873,23 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
+	if limit > 200 {
+		limit = 200
+	}
 
-	cmd := exec.Command("git", "--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit), `--format=%H|%an|%ae|%ad|%s`, branch)
+	offset := 0
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	args := []string{"--git-dir", localRepoPath, "log", "-n", strconv.Itoa(limit)}
+	if offset > 0 {
+		args = append(args, "--skip", strconv.Itoa(offset))
+	}
+	args = append(args, `--format=%H|%an|%ae|%ad|%s`, branch)
+	cmd := exec.Command("git", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -846,43 +925,7 @@ func (h *APIHandler) GetCommitHistory(w http.ResponseWriter, r *http.Request) {
 	if commits == nil {
 		commits = []CommitInfo{}
 	} else if len(commits) > 0 {
-		// Decorate commits with GCB statuses from Firestore
-		statusQuery := h.FirestoreClient.Collection("commit_statuses").
-			Where("owner", "==", owner).
-			Where("repo", "==", repo)
-		statusDocs, err := statusQuery.Documents(r.Context()).GetAll()
-		if err == nil {
-			shaToStatus := make(map[string]map[string]interface{})
-			for _, doc := range statusDocs {
-				var data map[string]interface{}
-				if err := doc.DataTo(&data); err == nil {
-					sha, _ := data["sha"].(string)
-					if sha != "" {
-						existing, exists := shaToStatus[sha]
-						if !exists {
-							shaToStatus[sha] = data
-						} else {
-							var curCreated, newCreated time.Time
-							if t, ok := existing["createdAt"].(time.Time); ok {
-								curCreated = t
-							}
-							if t, ok := data["createdAt"].(time.Time); ok {
-								newCreated = t
-							}
-							if newCreated.After(curCreated) {
-								shaToStatus[sha] = data
-							}
-						}
-					}
-				}
-			}
-			for i := range commits {
-				if statusData, ok := shaToStatus[commits[i].SHA]; ok {
-					commits[i].Status, _ = statusData["status"].(string)
-					commits[i].BuildID, _ = statusData["buildId"].(string)
-				}
-			}
-		}
+		h.DecorateCommitsWithStatuses(r.Context(), owner, repo, commits)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1126,6 +1169,7 @@ func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"devMode":  devMode,
 		"firebase": firebaseConfig,
+		"gitUrl":   os.Getenv("GIT_URL"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
