@@ -77,7 +77,7 @@ func TestPlan3LoopPrevention_AppInitiatedEvents(t *testing.T) {
 
 	r := chi.NewRouter()
 	jwtV := apps.NewJWTVerifier(fs, 60*time.Second)
-	appsH := apps.NewHandler(fs, scen.Store, jwtV)
+	appsH := apps.NewHandler(fs, scen.Store, jwtV, nil)
 	apps.RegisterRoutes(r, appsH)
 
 	v3H := v3.NewV3Handler(fs, nil, "http://t")

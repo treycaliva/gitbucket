@@ -1,0 +1,143 @@
+package apps
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"gitbucket/internal/auth"
+	"gitbucket/internal/db"
+)
+
+func TestManifestConversionEndpoint(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, _ := db.NewClient(ctx, "git-bucket-79382")
+	defer fs.Close()
+
+	authH := auth.NewAuthHandler(true, nil, fs) // DevMode = true; mock_<uid> Bearer tokens work
+	store := NewMemorySecretStore()
+	jwt := NewJWTVerifier(fs, 60*time.Second)
+	h := NewHandler(fs, store, jwt, authH)
+
+	r := chi.NewRouter()
+	RegisterRoutes(r, h)
+
+	suffix := randHex(4)
+	uid := "manifest-uid-" + suffix
+	username := "manifest-user-" + suffix
+	// Pre-register the username so the manifest handler can look up the owner.
+	if err := db.RegisterUsername(ctx, fs, uid, username, uid+"@test"); err != nil {
+		t.Fatalf("RegisterUsername: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = fs.Collection("usernames").Doc(username).Delete(context.Background())
+		_, _ = fs.Collection("users").Doc(uid).Delete(context.Background())
+	})
+
+	manifest := map[string]interface{}{
+		"name":            "Test Manifest App " + suffix,
+		"url":             "https://example.test",
+		"hook_attributes": map[string]interface{}{"url": "https://example.test/webhook"},
+		"redirect_url":    "https://example.test/setup/callback",
+		"public":          false,
+		"default_permissions": map[string]interface{}{
+			"contents":      "write",
+			"issues":        "write",
+			"pull_requests": "write",
+			"metadata":      "read",
+		},
+		"default_events": []string{"issues", "issue_comment", "pull_request"},
+	}
+	body, _ := json.Marshal(map[string]interface{}{"manifest": manifest})
+	req := httptest.NewRequest("POST", "/api/v3/settings/apps/manifest-conversions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer mock_"+uid)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("code = %d body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	redirectURL, _ := resp["redirect_url"].(string)
+	if !strings.HasPrefix(redirectURL, "https://example.test/setup/callback?code=") {
+		t.Errorf("redirect_url = %q (expected to start with the manifest's redirect_url + ?code=)", redirectURL)
+	}
+
+	// Extract the code and exchange it via hop 3.
+	code := strings.TrimPrefix(redirectURL, "https://example.test/setup/callback?code=")
+	if code == "" {
+		t.Fatal("could not extract code")
+	}
+
+	exchangeReq := httptest.NewRequest("POST", "/api/v3/app-manifests/"+code+"/conversions", nil)
+	exchangeRR := httptest.NewRecorder()
+	r.ServeHTTP(exchangeRR, exchangeReq)
+	if exchangeRR.Code != http.StatusOK {
+		t.Fatalf("exchange code = %d body: %s", exchangeRR.Code, exchangeRR.Body.String())
+	}
+	var bundle map[string]interface{}
+	_ = json.Unmarshal(exchangeRR.Body.Bytes(), &bundle)
+	for _, key := range []string{"id", "slug", "name", "owner", "client_id", "client_secret", "webhook_secret", "pem"} {
+		if _, ok := bundle[key]; !ok {
+			t.Errorf("bundle missing key %q", key)
+		}
+	}
+	if pem, _ := bundle["pem"].(string); !strings.Contains(pem, "BEGIN RSA PRIVATE KEY") {
+		t.Errorf("pem not a PKCS1 RSA private key, got: %q", pem)
+	}
+
+	// Cleanup the App + bot user.
+	appID, _ := bundle["id"].(string)
+	slug, _ := bundle["slug"].(string)
+	t.Cleanup(func() {
+		cctx := context.Background()
+		_, _ = fs.Collection(CollectionApps).Doc(appID).Delete(cctx)
+		_, _ = fs.Collection("usernames").Doc(slug + "[bot]").Delete(cctx)
+		docs, _ := fs.Collection(CollectionUsers).Where("username", "==", slug+"[bot]").Documents(cctx).GetAll()
+		for _, d := range docs {
+			_, _ = d.Ref.Delete(cctx)
+		}
+	})
+
+	// Second exchange must fail (single-use).
+	rr2 := httptest.NewRecorder()
+	r.ServeHTTP(rr2, httptest.NewRequest("POST", "/api/v3/app-manifests/"+code+"/conversions", nil))
+	if rr2.Code != http.StatusNotFound {
+		t.Errorf("second exchange code = %d, want 404", rr2.Code)
+	}
+}
+
+func TestManifestConversionRejectsUnauthenticated(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, _ := db.NewClient(ctx, "git-bucket-79382")
+	defer fs.Close()
+
+	authH := auth.NewAuthHandler(true, nil, fs)
+	h := NewHandler(fs, NewMemorySecretStore(), NewJWTVerifier(fs, 60*time.Second), authH)
+	r := chi.NewRouter()
+	RegisterRoutes(r, h)
+
+	req := httptest.NewRequest("POST", "/api/v3/settings/apps/manifest-conversions",
+		strings.NewReader(`{"manifest":{}}`))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("code = %d, want 401", rr.Code)
+	}
+}

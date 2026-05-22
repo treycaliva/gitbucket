@@ -39,7 +39,7 @@ func TestTokenMintPopulatesRepositoriesForSelected(t *testing.T) {
 
 	r := chi.NewRouter()
 	jwtV := apps.NewJWTVerifier(fs, 60*time.Second)
-	h := apps.NewHandler(fs, scen.Store, jwtV)
+	h := apps.NewHandler(fs, scen.Store, jwtV, nil)
 	apps.RegisterRoutes(r, h)
 
 	jwtStr := scen.SignJWT(t)
@@ -84,7 +84,7 @@ func TestPlan1AuthPlaneEndToEnd(t *testing.T) {
 
 	r := chi.NewRouter()
 	jwtV := apps.NewJWTVerifier(fs, 60*time.Second)
-	h := apps.NewHandler(fs, scen.Store, jwtV)
+	h := apps.NewHandler(fs, scen.Store, jwtV, nil)
 	apps.RegisterRoutes(r, h)
 
 	// Also mount a probe endpoint behind RequireInstallationToken to prove the

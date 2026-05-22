@@ -56,7 +56,7 @@ func TestAppHandlersEndToEnd(t *testing.T) {
 	block, _ := pem.Decode([]byte(secrets.PrivateKeyPEM))
 	priv, _ := x509.ParsePKCS1PrivateKey(block.Bytes)
 
-	h := NewHandler(fs, store, NewJWTVerifier(fs, 60*time.Second))
+	h := NewHandler(fs, store, NewJWTVerifier(fs, 60*time.Second), nil)
 	r := chi.NewRouter()
 	RegisterRoutes(r, h)
 
