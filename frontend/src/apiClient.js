@@ -53,4 +53,21 @@ export const apiClient = {
   submitManifestConversion(manifest) {
     return this.post('/api/v3/settings/apps/manifest-conversions', { manifest });
   },
+
+  // Plan 4 Task 6: App install page helpers.
+  getAppBySlug(slug) {
+    return this.get(`/api/v3/apps/${slug}/public`);
+  },
+
+  installApp({ appId, repositorySelection, repositoryIds }) {
+    return this.post('/api/v3/user/installations', {
+      app_id: appId,
+      repository_selection: repositorySelection,
+      repository_ids: repositoryIds || [],
+    });
+  },
+
+  listMyRepos() {
+    return this.get('/api/repos');
+  },
 };

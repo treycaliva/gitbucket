@@ -13,6 +13,7 @@ import CommitDetail from './pages/CommitDetail';
 import Tokens from './pages/Tokens';
 import BuildLogs from './pages/BuildLogs';
 import SettingsAppsNew from './pages/SettingsAppsNew';
+import SettingsAppsInstall from './pages/SettingsAppsInstall';
 
 const parseLocation = () => {
   const path = window.location.pathname;
@@ -110,6 +111,13 @@ const parseLocation = () => {
     return { page: 'apps_new', params: {} };
   }
 
+  // Plan 4 Task 6: App install page.
+  // Pattern: /settings/apps/{slug}/installations/new
+  if (segments.length === 5 && segments[0] === 'settings' && segments[1] === 'apps'
+      && segments[3] === 'installations' && segments[4] === 'new') {
+    return { page: 'apps_install', params: { slug: segments[2] } };
+  }
+
   // Fallback
   return { page: 'dashboard', params: {} };
 };
@@ -183,6 +191,9 @@ export default function App() {
     } else if (page === 'pull_detail') {
       const { owner, repo, number } = params;
       url = `/${owner}/${repo}/pulls/${number}`;
+    } else if (page === 'apps_install') {
+      const { slug } = params;
+      url = `/settings/apps/${slug}/installations/new`;
     }
 
     if (replace) {
@@ -260,6 +271,8 @@ export default function App() {
         return <Tokens user={user} onNavigate={navigate} />;
       case 'apps_new':
         return <SettingsAppsNew user={user} onNavigate={navigate} />;
+      case 'apps_install':
+        return <SettingsAppsInstall slug={navigation.params.slug} onNavigate={navigate} />;
       case 'pulls':
         return (
           <Repository 

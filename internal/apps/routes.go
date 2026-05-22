@@ -23,4 +23,7 @@ func RegisterRoutes(r chi.Router, h *Handler) {
 
 	// Plan 4 Task 3: SPA-driven installation endpoint (web auth).
 	r.Post("/api/v3/user/installations", h.CreateUserInstallation)
+
+	// Plan 4 Task 6: unauthenticated App public info for install page.
+	r.Get("/api/v3/apps/{slug}/public", h.GetAppPublic)
 }
