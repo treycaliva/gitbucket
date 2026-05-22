@@ -15,6 +15,10 @@ type Config struct {
 	LocalReposRoot       string
 	KMSKeyName           string
 	SecretManagerProject string
+	// Plan 3: Cloud Tasks webhook engine.
+	CloudTasksQueueName    string // e.g. "projects/<p>/locations/us-central1/queues/gitbucket-webhooks"
+	DispatcherOIDCSA       string // service account email Cloud Tasks uses for OIDC
+	DispatcherOIDCAudience string // expected audience on inbound dispatcher requests
 }
 
 // Load loads the configuration from environment variables.
@@ -57,13 +61,16 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:                 port,
-		GCSBucket:            os.Getenv("GCS_BUCKET"),
-		DevMode:              devMode,
-		RestrictedIP:         restrictedIP,
-		ProjectID:            projectID,
-		LocalReposRoot:       localReposRoot,
-		KMSKeyName:           kmsKeyName,
-		SecretManagerProject: secretManagerProject,
+		Port:                   port,
+		GCSBucket:              os.Getenv("GCS_BUCKET"),
+		DevMode:                devMode,
+		RestrictedIP:           restrictedIP,
+		ProjectID:              projectID,
+		LocalReposRoot:         localReposRoot,
+		KMSKeyName:             kmsKeyName,
+		SecretManagerProject:   secretManagerProject,
+		CloudTasksQueueName:    os.Getenv("CLOUD_TASKS_QUEUE_NAME"),
+		DispatcherOIDCSA:       os.Getenv("DISPATCHER_OIDC_SA"),
+		DispatcherOIDCAudience: os.Getenv("DISPATCHER_OIDC_AUDIENCE"),
 	}
 }

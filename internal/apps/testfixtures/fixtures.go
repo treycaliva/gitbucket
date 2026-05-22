@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 
 	"gitbucket/internal/apps"
+	"gitbucket/internal/db"
 )
 
 // Scenario bundles a freshly-seeded App + Installation + decoded private key,
@@ -107,8 +109,40 @@ func (s *Scenario) MintToken(ctx context.Context) (string, error) {
 	return out.Plaintext, nil
 }
 
+// SeedRepo creates a repository owned by the installation's account and
+// switches the installation's repository_selection to "selected" with this
+// one repo. Returns the repo name. Caller does NOT need to delete the repo
+// (Scenario.Cleanup will handle it via the updated cleanup logic).
+func (s *Scenario) SeedRepo(ctx context.Context) (string, error) {
+	repoName := "fx-repo-" + randHex(4)
+	if err := db.CreateRepositoryMetadata(ctx, s.FS,
+		s.Installation.Account.ID, s.Installation.Account.ID,
+		repoName, "", "public"); err != nil {
+		return "", err
+	}
+	// Firestore repo doc-ID convention is "<owner>_<name>" lowercased (see db.go).
+	repoID := strings.ToLower(s.Installation.Account.ID) + "_" + strings.ToLower(repoName)
+
+	_, err := s.FS.Collection(apps.CollectionInstallations).
+		Doc(s.Installation.InstallationID).
+		Update(ctx, []firestore.Update{
+			{Path: "repository_selection", Value: "selected"},
+			{Path: "repository_ids", Value: []string{repoID}},
+		})
+	if err != nil {
+		return "", err
+	}
+	s.Installation.RepositorySelection = "selected"
+	s.Installation.RepositoryIDs = []string{repoID}
+	return repoName, nil
+}
+
 // Cleanup deletes all seeded Firestore docs. Idempotent.
 func (s *Scenario) Cleanup(ctx context.Context) {
+	// Clean up any seeded repositories.
+	for _, repoID := range s.Installation.RepositoryIDs {
+		_, _ = s.FS.Collection("repositories").Doc(repoID).Delete(ctx)
+	}
 	_, _ = s.FS.Collection(apps.CollectionInstallations).Doc(s.Installation.InstallationID).Delete(ctx)
 	_, _ = s.FS.Collection(apps.CollectionApps).Doc(s.App.AppID).Delete(ctx)
 	_, _ = s.FS.Collection("usernames").Doc(s.App.Slug + "[bot]").Delete(ctx)

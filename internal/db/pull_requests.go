@@ -186,6 +186,30 @@ func UpdatePullRequestStatus(ctx context.Context, client *firestore.Client, owne
 	return err
 }
 
+// UpdatePullRequestTitleBody updates title and/or description of a PR.
+// Empty-string fields are treated as no-op (so callers can update just one).
+// Returns nil if both inputs are empty.
+func UpdatePullRequestTitleBody(ctx context.Context, client *firestore.Client, owner, repo string, number int, title, body string) error {
+	if title == "" && body == "" {
+		return nil
+	}
+	if client == nil {
+		return fmt.Errorf("firestore client is nil")
+	}
+	repoId := fmt.Sprintf("%s_%s", strings.ToLower(owner), strings.ToLower(repo))
+	prRef := client.Collection("repositories").Doc(repoId).Collection("pulls").Doc(strconv.Itoa(number))
+
+	updates := []firestore.Update{}
+	if title != "" {
+		updates = append(updates, firestore.Update{Path: "title", Value: title})
+	}
+	if body != "" {
+		updates = append(updates, firestore.Update{Path: "description", Value: body})
+	}
+	_, err := prRef.Update(ctx, updates)
+	return err
+}
+
 // UpdatePullRequestMergeableStatus updates the mergeable, lastCheckedSourceSha, and lastCheckedTargetSha fields of a Pull Request.
 func UpdatePullRequestMergeableStatus(ctx context.Context, client *firestore.Client, owner, repo string, number int, mergeable *bool, sourceSha, targetSha string) error {
 	if client == nil {

@@ -14,6 +14,7 @@ import (
 type InstallationContext struct {
 	InstallationID string
 	AppID          string
+	AppSlug        string
 	Account        AccountRef
 	Permissions    Permissions
 	RepositoryIDs  []string
@@ -62,6 +63,7 @@ func RequireInstallationToken(fs *firestore.Client) func(http.Handler) http.Hand
 			ic := &InstallationContext{
 				InstallationID: inst.InstallationID,
 				AppID:          inst.AppID,
+				AppSlug:        app.Slug,
 				Account:        inst.Account,
 				Permissions:    rec.Permissions,
 				RepositoryIDs:  rec.RepositoryIDs,

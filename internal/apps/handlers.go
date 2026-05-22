@@ -4,10 +4,15 @@ package apps
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/go-chi/chi/v5"
+
+	"gitbucket/internal/api/v3/v3fmt"
+	"gitbucket/internal/db"
 )
 
 type Handler struct {
@@ -93,17 +98,33 @@ func (h *Handler) CreateInstallationAccessToken(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	urls := v3fmt.NewURLBuilder(publicBaseURL())
+	var repos []v3fmt.RepositoryDTO
+	if inst.RepositorySelection == "selected" {
+		for _, repoID := range inst.RepositoryIDs {
+			// repoID format: "<owner>_<name>" (lowercased per db.CreateRepositoryMetadata).
+			parts := strings.SplitN(repoID, "_", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			meta, err := db.GetRepositoryMetadata(r.Context(), h.FS, parts[0], parts[1])
+			if err != nil || meta == nil {
+				continue
+			}
+			repos = append(repos, v3fmt.RepositoryFromMap(meta, urls))
+		}
+	}
+	if repos == nil {
+		repos = []v3fmt.RepositoryDTO{}
+	}
+
 	WriteJSON(w, 201, map[string]interface{}{
 		"token":                out.Plaintext,
 		"expires_at":           out.Record.ExpiresAt.UTC().Format(time.RFC3339),
 		"permissions":          permissionsJSON(out.Record.Permissions),
 		"repository_selection": inst.RepositorySelection,
 		"single_file":          nil,
-		// repositories array is left empty in Plan 1; populated in Plan 2 when
-		// the repository formatter exists. Apps using repository_selection ==
-		// "all" don't strictly need it, and "selected" installations get an
-		// empty list (acceptable for MVP).
-		"repositories": []interface{}{},
+		"repositories":         repos,
 	})
 }
 
@@ -140,4 +161,11 @@ func permissionsJSON(p Permissions) map[string]string {
 		out[k] = v.String()
 	}
 	return out
+}
+
+func publicBaseURL() string {
+	if v := os.Getenv("PUBLIC_BASE_URL"); v != "" {
+		return v
+	}
+	return "http://localhost:8080"
 }

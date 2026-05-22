@@ -18,6 +18,59 @@ import (
 	"gitbucket/internal/db"
 )
 
+func TestTokenMintPopulatesRepositoriesForSelected(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, err := db.NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("firestore: %v", err)
+	}
+	defer fs.Close()
+
+	scen := testfixtures.NewScenario(t, ctx, fs)
+	defer scen.Cleanup(ctx)
+
+	repoName, err := scen.SeedRepo(ctx)
+	if err != nil {
+		t.Fatalf("SeedRepo: %v", err)
+	}
+
+	r := chi.NewRouter()
+	jwtV := apps.NewJWTVerifier(fs, 60*time.Second)
+	h := apps.NewHandler(fs, scen.Store, jwtV)
+	apps.RegisterRoutes(r, h)
+
+	jwtStr := scen.SignJWT(t)
+	req := httptest.NewRequest("POST",
+		"/api/v3/app/installations/"+scen.Installation.InstallationID+"/access_tokens",
+		bytes.NewBufferString(`{}`))
+	req.Header.Set("Authorization", "Bearer "+jwtStr)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("code = %d body: %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if body["repository_selection"] != "selected" {
+		t.Errorf("repository_selection = %v, want selected", body["repository_selection"])
+	}
+	reposRaw, ok := body["repositories"].([]interface{})
+	if !ok {
+		t.Fatalf("repositories not an array: %v", body["repositories"])
+	}
+	if len(reposRaw) != 1 {
+		t.Fatalf("repositories len = %d, want 1; body=%s", len(reposRaw), rr.Body.String())
+	}
+	repo, _ := reposRaw[0].(map[string]interface{})
+	if repo["name"] != repoName {
+		t.Errorf("repos[0].name = %v, want %s", repo["name"], repoName)
+	}
+}
+
 func TestPlan1AuthPlaneEndToEnd(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST not set")
