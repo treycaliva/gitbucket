@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { authService } from '../authService';
 import {
   multiFactor,
@@ -7,7 +7,7 @@ import {
 import QRCode from 'qrcode';
 import { Shield, ShieldCheck, ShieldAlert, Copy, Check } from 'lucide-react';
 
-export default function Security() {
+export default function Security({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [enrolledFactors, setEnrolledFactors] = useState([]);
@@ -26,10 +26,11 @@ export default function Security() {
   const [unenrollSubmitting, setUnenrollSubmitting] = useState(false);
 
   const qrCanvasRef = useRef(null);
+  const copyTimerRef = useRef(null);
 
   const auth = authService.getAuthInstance();
 
-  const refreshFactors = async () => {
+  const refreshFactors = useCallback(async () => {
     if (!auth?.currentUser) {
       setEnrolledFactors([]);
       return;
@@ -42,7 +43,7 @@ export default function Security() {
       console.error(err);
       setError(err.message || 'Failed to load MFA status.');
     }
-  };
+  }, [auth]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +55,7 @@ export default function Security() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshFactors]);
 
   // QR rendering effect — runs when qrUrl changes.
   useEffect(() => {
@@ -64,6 +65,12 @@ export default function Security() {
       });
     }
   }, [qrUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   const handleStartEnroll = async () => {
     setError('');
@@ -75,7 +82,7 @@ export default function Security() {
     try {
       const session = await multiFactor(auth.currentUser).getSession();
       const secret = await TotpMultiFactorGenerator.generateSecret(session);
-      const url = secret.generateQrCodeUrl(auth.currentUser.email || 'gitbucket-user', 'GitBucket');
+      const url = secret.generateQrCodeUrl(user?.email || auth.currentUser.email || 'gitbucket-user', 'GitBucket');
       setTotpSecret(secret);
       setSecretText(secret.secretKey);
       setQrUrl(url);
@@ -137,7 +144,8 @@ export default function Security() {
     try {
       await navigator.clipboard.writeText(secretText);
       setSecretCopied(true);
-      setTimeout(() => setSecretCopied(false), 2000);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setSecretCopied(false), 2000);
     } catch (err) {
       console.error(err);
     }
@@ -154,6 +162,7 @@ export default function Security() {
     } catch (err) {
       console.error(err);
       if (err.code === 'auth/requires-recent-login') {
+        setUnenrollTarget(null);
         setError('Please sign out and sign in again before changing two-factor authentication.');
       } else {
         setError(err.message || 'Failed to remove second factor.');
@@ -311,6 +320,9 @@ export default function Security() {
 
       {unenrollTarget && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unenroll-modal-title"
           onClick={(e) => { if (e.target === e.currentTarget) setUnenrollTarget(null); }}
           style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
@@ -318,7 +330,7 @@ export default function Security() {
           }}
         >
           <div className="glass-card modal-content" style={{ padding: '2rem', maxWidth: '440px' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.75rem' }}>Remove two-factor authentication?</h3>
+            <h3 id="unenroll-modal-title" style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.75rem' }}>Remove two-factor authentication?</h3>
             <p style={{ color: '#94a3b8', marginBottom: '1.5rem', lineHeight: 1.5 }}>
               Removing two-factor authentication makes your account less secure. You'll only need your password to sign in.
             </p>
