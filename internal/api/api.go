@@ -645,25 +645,22 @@ func (h *APIHandler) DeleteBranch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Verify branch exists
-	if !branchExists(localRepoPath, branch) {
-		http.Error(w, fmt.Sprintf("Branch %q does not exist", branch), http.StatusNotFound)
-		return
-	}
-
-	// 2. Delete branch locally using git
-	_, err = runGit(localRepoPath, "branch", "-D", branch)
-	if err != nil {
-		http.Error(w, "Failed to delete branch: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// 3. Upload to GCS
-	if h.StorageClient != nil && h.BucketName != "" {
-		err = gcs.UploadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+	// If the branch exists locally, delete it and sync back to GCS.
+	// If it doesn't, fall through — the metadata entry is stale and will be
+	// reconciled below when we refresh `branches` from the real repo.
+	if branchExists(localRepoPath, branch) {
+		_, err = runGit(localRepoPath, "branch", "-D", branch)
 		if err != nil {
-			http.Error(w, "Failed to upload repository to GCS: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Failed to delete branch: "+err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		if h.StorageClient != nil && h.BucketName != "" {
+			err = gcs.UploadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+			if err != nil {
+				http.Error(w, "Failed to upload repository to GCS: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 
