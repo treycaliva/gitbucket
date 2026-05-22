@@ -248,6 +248,10 @@ class AuthService {
   getConfig() {
     return this.config;
   }
+
+  getAuthInstance() {
+    return this.auth;
+  }
 }
 
 export const authService = new AuthService();

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { authService } from '../authService';
+import { getMultiFactorResolver, TotpMultiFactorGenerator } from 'firebase/auth';
 import { Database, Lock, Mail, User } from 'lucide-react';
 
 const USERNAME_REGEX = /^[a-zA-Z0-9-]{3,20}$/;
@@ -13,6 +14,8 @@ export default function Login({ onNavigate, currentNavigation }) {
   const [loading, setLoading] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
   const [pickingUsername, setPickingUsername] = useState(false);
+  const [mfaResolver, setMfaResolver] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
 
   useEffect(() => {
     const unsubscribe = authService.onAuthStateChanged((user) => {
@@ -56,8 +59,20 @@ export default function Login({ onNavigate, currentNavigation }) {
       }
       // Navigation handled by useEffect subscribed to authService.onAuthStateChanged.
     } catch (err) {
-      console.error(err);
-      setError(err.message || 'Authentication failed. Please check your credentials.');
+      if (err.code === 'auth/multi-factor-auth-required') {
+        console.debug('[Auth] MFA required, prompting for TOTP.');
+        try {
+          const auth = authService.getAuthInstance();
+          const resolver = getMultiFactorResolver(auth, err);
+          setMfaResolver(resolver);
+        } catch (resolveErr) {
+          console.error(resolveErr);
+          setError(resolveErr.message || 'Failed to start MFA challenge.');
+        }
+      } else {
+        console.error(err);
+        setError(err.message || 'Authentication failed. Please check your credentials.');
+      }
     } finally {
       setLoading(false);
     }
@@ -86,6 +101,7 @@ export default function Login({ onNavigate, currentNavigation }) {
   };
 
   const devMode = authService.getConfig()?.devMode === true;
+  const mfaChallenging = mfaResolver !== null;
 
   const handlePickUsername = async (e) => {
     e.preventDefault();
@@ -137,6 +153,43 @@ export default function Login({ onNavigate, currentNavigation }) {
     setUsername('');
   };
 
+  const handleMfaSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!/^\d{6}$/.test(mfaCode)) {
+      setError('Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    if (!mfaResolver?.hints || mfaResolver.hints.length === 0) {
+      setError('No second-factor method found on this account. Please contact support.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const hint = mfaResolver.hints[0];
+      const assertion = TotpMultiFactorGenerator.assertionForSignIn(hint.uid, mfaCode);
+      await mfaResolver.resolveSignIn(assertion);
+      // onAuthStateChanged will fire; the existing navigation effect handles routing.
+      setMfaResolver(null);
+      setMfaCode('');
+    } catch (err) {
+      console.error(err);
+      if (err.code === 'auth/invalid-verification-code') {
+        setError('That code did not match. Try again with a fresh code from your app.');
+      } else {
+        setError(err.message || 'Verification failed.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelMfa = () => {
+    setMfaResolver(null);
+    setMfaCode('');
+    setError('');
+  };
+
   return (
     <div style={{
       display: 'flex',
@@ -162,16 +215,20 @@ export default function Login({ onNavigate, currentNavigation }) {
             <Database size={32} />
           </div>
           <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', fontWeight: 800 }}>
-            {pickingUsername
-              ? 'Choose a username'
-              : isSignUp ? 'Create Account' : 'Welcome to GitBucket'}
+            {mfaChallenging
+              ? 'Verify your identity'
+              : pickingUsername
+                ? 'Choose a username'
+                : isSignUp ? 'Create Account' : 'Welcome to GitBucket'}
           </h1>
           <p style={{ color: '#94a3b8', fontSize: '0.95rem' }}>
-            {pickingUsername
-              ? `Signed in as ${pendingUser?.email ?? ''}. Pick a username to finish setup.`
-              : isSignUp
-                ? 'Sign up to host repositories on GCS'
-                : 'Sign in to access your git repositories'}
+            {mfaChallenging
+              ? 'Two-factor authentication is required for this account.'
+              : pickingUsername
+                ? `Signed in as ${pendingUser?.email ?? ''}. Pick a username to finish setup.`
+                : isSignUp
+                  ? 'Sign up to host repositories on GCS'
+                  : 'Sign in to access your git repositories'}
           </p>
         </div>
 
@@ -190,7 +247,7 @@ export default function Login({ onNavigate, currentNavigation }) {
           </div>
         )}
 
-        {!pickingUsername && (
+        {!pickingUsername && !mfaChallenging && (
           <>
             {!devMode && (
               <>
@@ -358,7 +415,7 @@ export default function Login({ onNavigate, currentNavigation }) {
           </>
         )}
 
-        {pickingUsername && (
+        {pickingUsername && !mfaChallenging && (
           <form onSubmit={handlePickUsername}>
             <div className="form-group">
               <label className="form-label">Username</label>
@@ -418,6 +475,52 @@ export default function Login({ onNavigate, currentNavigation }) {
                   padding: 0
                 }}
                 onClick={handleCancelPickUsername}
+                disabled={loading}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {mfaChallenging && (
+          <form onSubmit={handleMfaSubmit}>
+            <p style={{ color: '#94a3b8', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+              Enter the 6-digit code from your authenticator app to finish signing in.
+            </p>
+
+            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+              <label className="form-label">Authenticator code</label>
+              <input
+                type="text"
+                className="text-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="123456"
+                disabled={loading}
+                autoFocus
+                required
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '0.85rem' }} disabled={loading}>
+              {loading ? (
+                <span className="loader" style={{ width: '16px', height: '16px', borderWidth: '2px' }}></span>
+              ) : (
+                'Verify and continue'
+              )}
+            </button>
+
+            <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.9rem', color: '#94a3b8' }}>
+              <button
+                type="button"
+                className="btn-link"
+                style={{ background: 'none', border: 'none', color: '#38bdf8', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                onClick={handleCancelMfa}
                 disabled={loading}
               >
                 Cancel
