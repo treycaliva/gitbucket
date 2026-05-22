@@ -83,6 +83,12 @@ func (h *AuthHandler) RequireWebAuth(next http.Handler) http.Handler {
 		}
 
 		ctx := r.Context()
+
+		if err := db.RejectBotUID(ctx, h.FirestoreClient, uid); err != nil {
+			http.Error(w, "Forbidden: "+err.Error(), http.StatusForbidden)
+			return
+		}
+
 		ctx = context.WithValue(ctx, UIDContextKey, uid)
 
 		if h.FirestoreClient != nil {
@@ -115,17 +121,23 @@ func (h *AuthHandler) RequireUID(r *http.Request) (string, error) {
 	if tok == "" {
 		return "", fmt.Errorf("missing bearer token")
 	}
+	var uid string
 	if h.DevMode && strings.HasPrefix(tok, "mock_") {
-		return strings.TrimPrefix(tok, "mock_"), nil
+		uid = strings.TrimPrefix(tok, "mock_")
+	} else {
+		if h.FirebaseAuth == nil {
+			return "", fmt.Errorf("auth client not configured")
+		}
+		verifiedToken, err := h.FirebaseAuth.VerifyIDToken(r.Context(), tok)
+		if err != nil {
+			return "", err
+		}
+		uid = verifiedToken.UID
 	}
-	if h.FirebaseAuth == nil {
-		return "", fmt.Errorf("auth client not configured")
-	}
-	verifiedToken, err := h.FirebaseAuth.VerifyIDToken(r.Context(), tok)
-	if err != nil {
+	if err := db.RejectBotUID(r.Context(), h.FirestoreClient, uid); err != nil {
 		return "", err
 	}
-	return verifiedToken.UID, nil
+	return uid, nil
 }
 
 // OptionalWebAuth is a middleware that optionally authenticates the token (Bearer or mock).
