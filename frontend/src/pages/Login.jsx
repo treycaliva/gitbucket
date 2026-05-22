@@ -53,10 +53,14 @@ export default function Login({ onNavigate, currentNavigation }) {
         }
       }
     } catch (err) {
-      console.error(err);
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-        setError('Sign-in cancelled.');
+      if (
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'auth/cancelled-popup-request' ||
+        err.code === 'auth/popup-blocked'
+      ) {
+        setError('Sign-in was cancelled or blocked. Please allow pop-ups and try again.');
       } else {
+        console.error(err);
         setError(err.message || 'Google sign-in failed.');
       }
     } finally {
@@ -126,7 +130,7 @@ export default function Login({ onNavigate, currentNavigation }) {
                 padding: '0.75rem',
                 background: '#ffffff',
                 color: '#1f2937',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                border: '1px solid #dadce0',
                 borderRadius: '8px',
                 fontWeight: 600,
                 fontSize: '0.95rem',
