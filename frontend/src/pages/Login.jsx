@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { authService } from '../authService';
 import { Database, Lock, Mail, User } from 'lucide-react';
 
+const USERNAME_REGEX = /^[a-zA-Z0-9-]{3,20}$/;
+
 export default function Login({ onNavigate, currentNavigation }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -45,18 +47,14 @@ export default function Login({ onNavigate, currentNavigation }) {
 
     try {
       if (isSignUp) {
-        if (!username || !/^[a-zA-Z0-9-]{3,20}$/.test(username)) {
-          throw new Error('Username must be alphanumeric, 3-20 characters long.');
+        if (!username || !USERNAME_REGEX.test(username)) {
+          throw new Error('Username must be alphanumeric (with hyphens), 3-20 characters long.');
         }
         await authService.signup(email, password, username);
       } else {
         await authService.login(email, password);
       }
-      if (currentNavigation && currentNavigation.page !== 'dashboard') {
-        onNavigate(currentNavigation.page, currentNavigation.params, true);
-      } else {
-        onNavigate('dashboard');
-      }
+      // Navigation handled by useEffect subscribed to authService.onAuthStateChanged.
     } catch (err) {
       console.error(err);
       setError(err.message || 'Authentication failed. Please check your credentials.');
@@ -92,7 +90,7 @@ export default function Login({ onNavigate, currentNavigation }) {
   const handlePickUsername = async (e) => {
     e.preventDefault();
     setError('');
-    if (!username || !/^[a-zA-Z0-9-]{3,20}$/.test(username)) {
+    if (!username || !USERNAME_REGEX.test(username)) {
       setError('Username must be alphanumeric (with hyphens), 3-20 characters long.');
       return;
     }
