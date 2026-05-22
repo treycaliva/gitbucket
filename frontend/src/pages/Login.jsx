@@ -60,6 +60,7 @@ export default function Login({ onNavigate, currentNavigation }) {
       // Navigation handled by useEffect subscribed to authService.onAuthStateChanged.
     } catch (err) {
       if (err.code === 'auth/multi-factor-auth-required') {
+        console.debug('[Auth] MFA required, prompting for TOTP.');
         try {
           const auth = authService.getAuthInstance();
           const resolver = getMultiFactorResolver(auth, err);
@@ -157,6 +158,10 @@ export default function Login({ onNavigate, currentNavigation }) {
     setError('');
     if (!/^\d{6}$/.test(mfaCode)) {
       setError('Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    if (!mfaResolver?.hints || mfaResolver.hints.length === 0) {
+      setError('No second-factor method found on this account. Please contact support.');
       return;
     }
     setLoading(true);
