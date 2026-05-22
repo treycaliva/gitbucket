@@ -16,6 +16,7 @@ import Security from './pages/Security';
 import BuildLogs from './pages/BuildLogs';
 import SettingsAppsNew from './pages/SettingsAppsNew';
 import SettingsAppsInstall from './pages/SettingsAppsInstall';
+import SettingsApps from './pages/SettingsApps';
 
 const parseLocation = () => {
   const path = window.location.pathname;
@@ -96,6 +97,13 @@ const parseLocation = () => {
         sha: segments[3]
       }
     };
+  }
+
+  // Plan 4 Task 7: GitHub Apps list page.
+  // Pattern: /settings/apps
+  // Must appear BEFORE the 2-segment /:owner/:repo branch.
+  if (segments.length === 2 && segments[0] === 'settings' && segments[1] === 'apps') {
+    return { page: 'apps_list', params: {} };
   }
 
   // 6. Repository Details & Tabs
@@ -203,6 +211,8 @@ export default function App() {
     } else if (page === 'apps_install') {
       const { slug } = params;
       url = `/settings/apps/${slug}/installations/new`;
+    } else if (page === 'apps_list') {
+      url = '/settings/apps';
     }
 
     if (replace) {
@@ -284,6 +294,8 @@ export default function App() {
         return <SettingsAppsNew user={user} onNavigate={navigate} />;
       case 'apps_install':
         return <SettingsAppsInstall slug={navigation.params.slug} onNavigate={navigate} />;
+      case 'apps_list':
+        return <SettingsApps onNavigate={navigate} />;
       case 'pulls':
         return (
           <Repository 

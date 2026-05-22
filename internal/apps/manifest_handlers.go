@@ -152,6 +152,68 @@ func (h *Handler) CreateManifestApp(w http.ResponseWriter, r *http.Request) {
 	_ = username
 }
 
+// ListMyApps handles GET /api/v3/user/apps. Lists Apps owned by the
+// authenticated user. Web-authed.
+func (h *Handler) ListMyApps(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.Auth.RequireUID(r)
+	if err != nil {
+		WriteError(w, ErrUnauthorized)
+		return
+	}
+	iter := h.FS.Collection(CollectionApps).Where("owner_account.id", "==", uid).Documents(r.Context())
+	defer iter.Stop()
+	out := []map[string]interface{}{}
+	for {
+		doc, err := iter.Next()
+		if err != nil {
+			break
+		}
+		var a App
+		if err := doc.DataTo(&a); err != nil {
+			continue
+		}
+		out = append(out, map[string]interface{}{
+			"id":   a.AppID,
+			"slug": a.Slug,
+			"name": a.Name,
+		})
+	}
+	WriteJSON(w, http.StatusOK, out)
+}
+
+// ListMyInstallations handles GET /api/v3/user/installations. Lists
+// installations on the authenticated user's account. Web-authed.
+func (h *Handler) ListMyInstallations(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.Auth.RequireUID(r)
+	if err != nil {
+		WriteError(w, ErrUnauthorized)
+		return
+	}
+	iter := h.FS.Collection(CollectionInstallations).Where("account.id", "==", uid).Documents(r.Context())
+	defer iter.Stop()
+	out := []map[string]interface{}{}
+	for {
+		doc, err := iter.Next()
+		if err != nil {
+			break
+		}
+		var inst Installation
+		if err := doc.DataTo(&inst); err != nil {
+			continue
+		}
+		appName := ""
+		if app, _ := GetApp(r.Context(), h.FS, inst.AppID); app != nil {
+			appName = app.Name
+		}
+		out = append(out, map[string]interface{}{
+			"id":       inst.InstallationID,
+			"app_id":   inst.AppID,
+			"app_name": appName,
+		})
+	}
+	WriteJSON(w, http.StatusOK, out)
+}
+
 // GetAppPublic handles GET /api/v3/apps/{slug}/public — returns just the
 // fields safe for an unauthenticated install-page preview.
 func (h *Handler) GetAppPublic(w http.ResponseWriter, r *http.Request) {

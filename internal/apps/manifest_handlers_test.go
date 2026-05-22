@@ -142,6 +142,127 @@ func TestManifestConversionRejectsUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestListMyAppsAndInstallations(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, _ := db.NewClient(ctx, "git-bucket-79382")
+	defer fs.Close()
+
+	suffix := randHex(4)
+	uid := "list-uid-" + suffix
+	username := "list-user-" + suffix
+	if err := db.RegisterUsername(ctx, fs, uid, username, uid+"@test"); err != nil {
+		t.Fatalf("RegisterUsername: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = fs.Collection("usernames").Doc(username).Delete(context.Background())
+		_, _ = fs.Collection("users").Doc(uid).Delete(context.Background())
+	})
+
+	// Seed an App owned by this user.
+	store := NewMemorySecretStore()
+	slug := "list-app-" + suffix
+	botUID, _ := CreateBotUser(ctx, fs, slug, slug, "", "pending")
+	app, _, _ := CreateApp(ctx, fs, store, CreateAppRequest{
+		Slug:         slug,
+		Name:         "List App",
+		OwnerAccount: AccountRef{ID: uid, Type: AccountTypeUser},
+		BotUserID:    botUID,
+		WebhookURL:   "https://example.test/hook",
+	})
+	t.Cleanup(func() {
+		cctx := context.Background()
+		_, _ = fs.Collection(CollectionApps).Doc(app.AppID).Delete(cctx)
+		_, _ = fs.Collection("usernames").Doc(slug + "[bot]").Delete(cctx)
+		_, _ = fs.Collection(CollectionUsers).Doc(botUID).Delete(cctx)
+	})
+
+	// Seed an installation on this user's account using a DIFFERENT App
+	// (so listMyApps and listMyInstallations test different things).
+	otherSlug := "other-app-" + suffix
+	otherBot, _ := CreateBotUser(ctx, fs, otherSlug, otherSlug, "", "pending")
+	otherApp, _, _ := CreateApp(ctx, fs, store, CreateAppRequest{
+		Slug:         otherSlug,
+		Name:         "Other App",
+		OwnerAccount: AccountRef{ID: "someone-else-" + suffix, Type: AccountTypeUser},
+		BotUserID:    otherBot,
+		WebhookURL:   "https://example.test/other",
+	})
+	inst, _ := CreateInstallation(ctx, fs, CreateInstallationRequest{
+		AppID:               otherApp.AppID,
+		Account:             AccountRef{ID: uid, Type: AccountTypeUser},
+		RepositorySelection: "all",
+	})
+	t.Cleanup(func() {
+		cctx := context.Background()
+		_, _ = fs.Collection(CollectionInstallations).Doc(inst.InstallationID).Delete(cctx)
+		_, _ = fs.Collection(CollectionApps).Doc(otherApp.AppID).Delete(cctx)
+		_, _ = fs.Collection("usernames").Doc(otherSlug + "[bot]").Delete(cctx)
+		_, _ = fs.Collection(CollectionUsers).Doc(otherBot).Delete(cctx)
+	})
+
+	authH := auth.NewAuthHandler(true, nil, fs)
+	h := NewHandler(fs, store, NewJWTVerifier(fs, 60*time.Second), authH)
+	r := chi.NewRouter()
+	RegisterRoutes(r, h)
+
+	t.Run("list my apps", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v3/user/apps", nil)
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("code = %d body: %s", rr.Code, rr.Body.String())
+		}
+		var list []map[string]interface{}
+		_ = json.Unmarshal(rr.Body.Bytes(), &list)
+		var foundOwned bool
+		for _, item := range list {
+			if item["slug"] == slug {
+				foundOwned = true
+			}
+		}
+		if !foundOwned {
+			t.Errorf("expected owned app %q in list, got %+v", slug, list)
+		}
+	})
+
+	t.Run("list my installations", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v3/user/installations", nil)
+		req.Header.Set("Authorization", "Bearer mock_"+uid)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("code = %d body: %s", rr.Code, rr.Body.String())
+		}
+		var list []map[string]interface{}
+		_ = json.Unmarshal(rr.Body.Bytes(), &list)
+		var foundInstall bool
+		for _, item := range list {
+			if item["app_id"] == otherApp.AppID {
+				foundInstall = true
+				if item["app_name"] != "Other App" {
+					t.Errorf("app_name = %v, want Other App", item["app_name"])
+				}
+			}
+		}
+		if !foundInstall {
+			t.Errorf("expected installation of %q in list, got %+v", otherApp.AppID, list)
+		}
+	})
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/v3/user/apps", nil)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("code = %d, want 401", rr.Code)
+		}
+	})
+}
+
 func TestGetAppPublic(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST not set")
