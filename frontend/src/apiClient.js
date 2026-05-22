@@ -67,6 +67,14 @@ export const apiClient = {
     });
   },
 
+  // Plan 4 Task 7: user apps + installations list.
+  listMyApps() {
+    return this.get('/api/v3/user/apps');
+  },
+  listMyInstallations() {
+    return this.get('/api/v3/user/installations');
+  },
+
   listMyRepos() {
     return this.get('/api/repos');
   },
