@@ -1,10 +1,12 @@
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithEmailAndPassword as fbSignIn, 
-  createUserWithEmailAndPassword as fbSignUp, 
-  signOut as fbSignOut, 
-  onAuthStateChanged as fbOnAuthStateChanged
+import {
+  getAuth,
+  signInWithEmailAndPassword as fbSignIn,
+  createUserWithEmailAndPassword as fbSignUp,
+  signOut as fbSignOut,
+  onAuthStateChanged as fbOnAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 
 class AuthService {
@@ -227,6 +229,20 @@ class AuthService {
       if (!this.auth.currentUser) return '';
       return await this.auth.currentUser.getIdToken();
     }
+  }
+
+  async loginWithGoogle() {
+    await this.init();
+
+    if (this.devMode) {
+      throw new Error('Google sign-in is not available in dev mode.');
+    }
+
+    const provider = new GoogleAuthProvider();
+    const cred = await signInWithPopup(this.auth, provider);
+    // onAuthStateChanged will fire, fetch /api/user/me, and set this.currentUser.
+    // If the user is brand new, /api/user/me returns 404 and currentUser.username will be null.
+    return cred.user;
   }
 
   getConfig() {
