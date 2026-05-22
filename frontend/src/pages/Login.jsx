@@ -106,8 +106,17 @@ export default function Login({ onNavigate, currentNavigation }) {
         body: JSON.stringify({ username: username.toLowerCase() })
       });
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to register username.');
+        const body = await res.text().catch(() => '');
+        let msg = 'Failed to register username.';
+        if (body) {
+          try {
+            const parsed = JSON.parse(body);
+            msg = parsed.error || parsed.message || body;
+          } catch {
+            msg = body;
+          }
+        }
+        throw new Error(msg);
       }
       authService.currentUser = {
         ...authService.currentUser,
