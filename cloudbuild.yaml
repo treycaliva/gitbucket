@@ -1,4 +1,0 @@
-steps:
-  - name: 'alpine'
-    entrypoint: 'sh'
-    args: ['-c', 'echo "Hello from Cloud Build!"']
