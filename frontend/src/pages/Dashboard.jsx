@@ -24,6 +24,21 @@ function writePins(slugs) {
   localStorage.setItem(PIN_KEY, JSON.stringify(slugs.slice(0, MAX_PINS)));
 }
 
+// Concurrency-limited async mapper (no new deps). Keeps the /pulls fan-out
+// bounded so hundreds of repos don't fire hundreds of parallel requests.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      results[idx] = await fn(items[idx], idx);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // Firestore timestamps arrive as { seconds } (see existing updatedAt usage).
 function tsOf(r) {
   const u = r.updatedAt;
@@ -68,19 +83,21 @@ export default function Dashboard({ user, onNavigate }) {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sort, setSort] = useState('updated');
 
+  // Capture username as a stable string so the effect chain doesn't re-fire on
+  // a new `user` object reference (which would trigger a second N+1 burst).
+  const username = user?.username;
+
   const loadPullsAndWaiting = useCallback(async (repoList) => {
     if (!repoList.length) { setOpenPRCount({}); setWaitingOnMe([]); return; }
-    const results = await Promise.all(
-      repoList.map((r) =>
-        apiClient
-          .get(`/api/repos/${r.owner}/${r.name}/pulls`)
-          .then((pulls) => ({ r, pulls: Array.isArray(pulls) ? pulls : [], ok: true }))
-          .catch(() => ({ r, pulls: [], ok: false }))
-      )
+    const results = await mapLimit(repoList, 8, (r) =>
+      apiClient
+        .get(`/api/repos/${r.owner}/${r.name}/pulls`)
+        .then((pulls) => ({ r, pulls: Array.isArray(pulls) ? pulls : [], ok: true }))
+        .catch(() => ({ r, pulls: [], ok: false }))
     );
     const counts = {};
     const waiting = [];
-    const me = user?.username;
+    const me = username;
     for (const { r, pulls, ok } of results) {
       const slug = slugOf(r);
       // The /pulls list returns ALL pull requests (the backend ignores ?status),
@@ -99,7 +116,7 @@ export default function Dashboard({ user, onNavigate }) {
     }
     setOpenPRCount(counts);
     setWaitingOnMe(waiting);
-  }, [user]);
+  }, [username]);
 
   const loadRepos = useCallback(async () => {
     try {
@@ -216,7 +233,7 @@ export default function Dashboard({ user, onNavigate }) {
         <div>
           <div style={{ fontFamily: 'var(--gb-mono)', fontSize: 10.5, color: 'var(--gb-fg-4)', letterSpacing: '0.05em' }}>{today}</div>
           <h1 style={{ fontSize: 24, fontWeight: 500, letterSpacing: '-0.02em', margin: '2px 0 0' }}>
-            {greet}, <span style={{ color: 'var(--gb-accent)' }}>{user?.username}</span>.
+            {greet}, <span style={{ color: 'var(--gb-accent)' }}>{username}</span>.
           </h1>
           <p style={{ color: 'var(--gb-fg-3)', fontSize: 13, marginTop: 4 }}>
             {reviewCount > 0
@@ -231,18 +248,19 @@ export default function Dashboard({ user, onNavigate }) {
 
       {loading ? (
         <div className="loader-container"><div className="loader" /></div>
-      ) : repos.length === 0 && !error ? (
+      ) : (
+        <>
+          {error && (
+            <Card style={{ borderColor: 'var(--gb-err-dim)', color: 'var(--gb-err)', padding: '1rem', marginBottom: 16 }}>{error}</Card>
+          )}
+          {repos.length === 0 ? (
         <Card style={{ textAlign: 'center', padding: '4rem 2rem', borderStyle: 'dashed' }}>
           <Folder size={48} style={{ color: 'var(--gb-fg-4)', marginBottom: '1rem' }} />
           <h3 style={{ color: 'var(--gb-fg)', marginBottom: '0.5rem' }}>No repositories yet</h3>
           <p style={{ marginBottom: '1.5rem', fontSize: '0.95rem', color: 'var(--gb-fg-3)' }}>Get started by creating your first repository.</p>
           <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={18} /> Create Repository</button>
         </Card>
-      ) : (
-        <>
-          {error && (
-            <Card style={{ borderColor: 'var(--gb-err-dim)', color: 'var(--gb-err)', padding: '1rem', marginBottom: 16 }}>{error}</Card>
-          )}
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 22 }}>
             {/* LEFT COLUMN */}
             <div>
@@ -379,6 +397,7 @@ export default function Dashboard({ user, onNavigate }) {
               </div>
             </aside>
           </div>
+          )}
         </>
       )}
 
