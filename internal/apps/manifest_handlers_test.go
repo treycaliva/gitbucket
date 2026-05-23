@@ -141,3 +141,64 @@ func TestManifestConversionRejectsUnauthenticated(t *testing.T) {
 		t.Errorf("code = %d, want 401", rr.Code)
 	}
 }
+
+func TestGetAppPublic(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, _ := db.NewClient(ctx, "git-bucket-79382")
+	defer fs.Close()
+
+	suffix := randHex(4)
+	slug := "pubapp-" + suffix
+	botUID, _ := CreateBotUser(ctx, fs, slug, slug, "", "pending")
+	store := NewMemorySecretStore()
+	app, _, err := CreateApp(ctx, fs, store, CreateAppRequest{
+		Slug:         slug,
+		Name:         "Public App",
+		OwnerAccount: AccountRef{ID: "owner-" + suffix, Type: AccountTypeUser},
+		BotUserID:    botUID,
+		WebhookURL:   "https://example.test/hook",
+		DefaultPermissions: Permissions{"issues": PermWrite, "metadata": PermRead},
+		DefaultEvents:      []string{"issues", "pull_request"},
+	})
+	if err != nil {
+		t.Fatalf("CreateApp: %v", err)
+	}
+	t.Cleanup(func() {
+		cctx := context.Background()
+		_, _ = fs.Collection(CollectionApps).Doc(app.AppID).Delete(cctx)
+		_, _ = fs.Collection("usernames").Doc(slug + "[bot]").Delete(cctx)
+		_, _ = fs.Collection(CollectionUsers).Doc(botUID).Delete(cctx)
+	})
+
+	authH := auth.NewAuthHandler(true, nil, fs)
+	h := NewHandler(fs, store, NewJWTVerifier(fs, 60*time.Second), authH)
+	r := chi.NewRouter()
+	RegisterRoutes(r, h)
+
+	// Found.
+	req := httptest.NewRequest("GET", "/api/v3/apps/"+slug+"/public", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d body: %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if body["slug"] != slug || body["name"] != "Public App" {
+		t.Errorf("body = %+v", body)
+	}
+	if _, ok := body["permissions"].(map[string]interface{}); !ok {
+		t.Errorf("permissions field missing or wrong type")
+	}
+
+	// Not found.
+	req = httptest.NewRequest("GET", "/api/v3/apps/no-such-slug/public", nil)
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("code = %d, want 404", rr.Code)
+	}
+}

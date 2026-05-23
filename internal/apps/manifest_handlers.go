@@ -152,6 +152,24 @@ func (h *Handler) CreateManifestApp(w http.ResponseWriter, r *http.Request) {
 	_ = username
 }
 
+// GetAppPublic handles GET /api/v3/apps/{slug}/public — returns just the
+// fields safe for an unauthenticated install-page preview.
+func (h *Handler) GetAppPublic(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	app, err := GetAppBySlug(r.Context(), h.FS, slug)
+	if err != nil || app == nil {
+		WriteError(w, ErrNotFound)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"id":          app.AppID,
+		"slug":        app.Slug,
+		"name":        app.Name,
+		"permissions": permissionsJSON(app.DefaultPermissions),
+		"events":      app.DefaultEvents,
+	})
+}
+
 // ExchangeManifestCode handles POST /api/v3/app-manifests/{code}/conversions.
 // Looks up the code, returns the plaintext secrets bundle (one time only),
 // deletes the conversion record.
