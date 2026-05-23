@@ -47,5 +47,10 @@ export const apiClient = {
   post: (url, body, options) => request(url, { method: 'POST', body: JSON.stringify(body), ...options }),
   put: (url, body, options) => request(url, { method: 'PUT', body: JSON.stringify(body), ...options }),
   patch: (url, body, options) => request(url, { method: 'PATCH', body: JSON.stringify(body), ...options }),
-  delete: (url, options) => request(url, { method: 'DELETE', ...options })
+  delete: (url, options) => request(url, { method: 'DELETE', ...options }),
+
+  // Plan 4: GitHub App manifest registration flow.
+  submitManifestConversion(manifest) {
+    return this.post('/api/v3/settings/apps/manifest-conversions', { manifest });
+  },
 };

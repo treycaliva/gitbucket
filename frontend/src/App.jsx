@@ -14,6 +14,7 @@ import CommitDetail from './pages/CommitDetail';
 import Tokens from './pages/Tokens';
 import Security from './pages/Security';
 import BuildLogs from './pages/BuildLogs';
+import SettingsAppsNew from './pages/SettingsAppsNew';
 
 const parseLocation = () => {
   const path = window.location.pathname;
@@ -99,15 +100,21 @@ const parseLocation = () => {
   // 6. Repository Details & Tabs
   // Pattern: /:owner/:repo
   if (segments.length === 2) {
-    return { 
-      page: 'repository', 
-      params: { 
-        owner: segments[0], 
+    return {
+      page: 'repository',
+      params: {
+        owner: segments[0],
         repo: segments[1],
         tab: searchParams.get('tab') || 'code',
         path: searchParams.get('path') || ''
-      } 
+      }
     };
+  }
+
+  // Plan 4: GitHub App manifest confirmation page.
+  // Pattern: /settings/apps/new (with ?manifest=<URL-encoded JSON>)
+  if (segments.length === 3 && segments[0] === 'settings' && segments[1] === 'apps' && segments[2] === 'new') {
+    return { page: 'apps_new', params: {} };
   }
 
   // Fallback
@@ -260,8 +267,13 @@ export default function App() {
         );
       case 'tokens':
         return <Tokens user={user} onNavigate={navigate} />;
+<<<<<<< HEAD
       case 'security':
         return <Security user={user} onNavigate={navigate} />;
+=======
+      case 'apps_new':
+        return <SettingsAppsNew user={user} onNavigate={navigate} />;
+>>>>>>> b6251cd (feat(frontend): manifest confirmation page (hop 1 of App registration))
       case 'pulls':
         return (
           <Repository 
