@@ -14,4 +14,20 @@ func RegisterRoutes(r chi.Router, h *Handler) {
 		r.Get("/installations/{installation_id}", h.GetInstallation)
 		r.Post("/installations/{installation_id}/access_tokens", h.CreateInstallationAccessToken)
 	})
+
+	// Plan 4: manifest registration flow.
+	// CreateManifestApp uses its own internal web-auth check (not middleware).
+	// ExchangeManifestCode is unauthenticated — the code itself is the credential.
+	r.Post("/api/v3/settings/apps/manifest-conversions", h.CreateManifestApp)
+	r.Post("/api/v3/app-manifests/{code}/conversions", h.ExchangeManifestCode)
+
+	// Plan 4 Task 3: SPA-driven installation endpoint (web auth).
+	r.Post("/api/v3/user/installations", h.CreateUserInstallation)
+
+	// Plan 4 Task 7: user apps + installations list endpoints (web auth).
+	r.Get("/api/v3/user/apps", h.ListMyApps)
+	r.Get("/api/v3/user/installations", h.ListMyInstallations)
+
+	// Plan 4 Task 6: unauthenticated App public info for install page.
+	r.Get("/api/v3/apps/{slug}/public", h.GetAppPublic)
 }

@@ -240,10 +240,35 @@ func hashToken(token string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// RejectBotUID returns an error when uid refers to a synthetic bot user.
+// Used by paths that mint credentials (PAT generation, login) to prevent
+// impersonation of bot accounts. Returns nil for unknown UIDs — the caller
+// decides what to do with those.
+func RejectBotUID(ctx context.Context, client *firestore.Client, uid string) error {
+	if client == nil || uid == "" {
+		return nil
+	}
+	doc, err := client.Collection("users").Doc(uid).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil
+		}
+		return err
+	}
+	typeVal, _ := doc.DataAt("type")
+	if t, ok := typeVal.(string); ok && t == "Bot" {
+		return fmt.Errorf("bot user cannot perform this action")
+	}
+	return nil
+}
+
 // GeneratePAT creates a raw gb_pat_... token and saves its hash in the tokens collection.
 func GeneratePAT(ctx context.Context, client *firestore.Client, uid, name string) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("firestore client is nil")
+	}
+	if err := RejectBotUID(ctx, client, uid); err != nil {
+		return "", err
 	}
 	b := make([]byte, 20)
 	if _, err := rand.Read(b); err != nil {

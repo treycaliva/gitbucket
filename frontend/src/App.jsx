@@ -14,6 +14,9 @@ import CommitDetail from './pages/CommitDetail';
 import Tokens from './pages/Tokens';
 import Security from './pages/Security';
 import BuildLogs from './pages/BuildLogs';
+import SettingsAppsNew from './pages/SettingsAppsNew';
+import SettingsAppsInstall from './pages/SettingsAppsInstall';
+import SettingsApps from './pages/SettingsApps';
 
 const parseLocation = () => {
   const path = window.location.pathname;
@@ -96,18 +99,38 @@ const parseLocation = () => {
     };
   }
 
+  // Plan 4 Task 7: GitHub Apps list page.
+  // Pattern: /settings/apps
+  // Must appear BEFORE the 2-segment /:owner/:repo branch.
+  if (segments.length === 2 && segments[0] === 'settings' && segments[1] === 'apps') {
+    return { page: 'apps_list', params: {} };
+  }
+
   // 6. Repository Details & Tabs
   // Pattern: /:owner/:repo
   if (segments.length === 2) {
-    return { 
-      page: 'repository', 
-      params: { 
-        owner: segments[0], 
+    return {
+      page: 'repository',
+      params: {
+        owner: segments[0],
         repo: segments[1],
         tab: searchParams.get('tab') || 'code',
         path: searchParams.get('path') || ''
-      } 
+      }
     };
+  }
+
+  // Plan 4: GitHub App manifest confirmation page.
+  // Pattern: /settings/apps/new (with ?manifest=<URL-encoded JSON>)
+  if (segments.length === 3 && segments[0] === 'settings' && segments[1] === 'apps' && segments[2] === 'new') {
+    return { page: 'apps_new', params: {} };
+  }
+
+  // Plan 4 Task 6: App install page.
+  // Pattern: /settings/apps/{slug}/installations/new
+  if (segments.length === 5 && segments[0] === 'settings' && segments[1] === 'apps'
+      && segments[3] === 'installations' && segments[4] === 'new') {
+    return { page: 'apps_install', params: { slug: segments[2] } };
   }
 
   // Fallback
@@ -185,6 +208,11 @@ export default function App() {
     } else if (page === 'pull_detail') {
       const { owner, repo, number } = params;
       url = `/${owner}/${repo}/pulls/${number}`;
+    } else if (page === 'apps_install') {
+      const { slug } = params;
+      url = `/settings/apps/${slug}/installations/new`;
+    } else if (page === 'apps_list') {
+      url = '/settings/apps';
     }
 
     if (replace) {
@@ -262,6 +290,12 @@ export default function App() {
         return <Tokens user={user} onNavigate={navigate} />;
       case 'security':
         return <Security user={user} onNavigate={navigate} />;
+      case 'apps_new':
+        return <SettingsAppsNew user={user} onNavigate={navigate} />;
+      case 'apps_install':
+        return <SettingsAppsInstall slug={navigation.params.slug} onNavigate={navigate} />;
+      case 'apps_list':
+        return <SettingsApps onNavigate={navigate} />;
       case 'pulls':
         return (
           <Repository 

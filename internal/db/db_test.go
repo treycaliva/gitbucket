@@ -278,6 +278,77 @@ func TestDistributedLocks(t *testing.T) {
 	}
 }
 
+func TestRejectBotUID(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, err := NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	defer fs.Close()
+
+	suffix := randSuffix()
+
+	// Seed a bot user.
+	botUID := "bot_test_" + suffix
+	_, err = fs.Collection("users").Doc(botUID).Set(ctx, map[string]interface{}{
+		"username": "test-bot-" + suffix + "[bot]",
+		"type":     "Bot",
+	})
+	if err != nil {
+		t.Fatalf("seed bot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = fs.Collection("users").Doc(botUID).Delete(context.Background())
+	})
+
+	if err := RejectBotUID(ctx, fs, botUID); err == nil {
+		t.Error("expected error for bot UID")
+	}
+
+	// Seed a normal user.
+	humanUID := "human_test_" + suffix
+	_, _ = fs.Collection("users").Doc(humanUID).Set(ctx, map[string]interface{}{
+		"username": "test-human-" + suffix,
+		"type":     "User",
+	})
+	t.Cleanup(func() {
+		_, _ = fs.Collection("users").Doc(humanUID).Delete(context.Background())
+	})
+
+	if err := RejectBotUID(ctx, fs, humanUID); err != nil {
+		t.Errorf("unexpected error for human UID: %v", err)
+	}
+}
+
+func TestGeneratePAT_RejectsBot(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, err := NewClient(ctx, "git-bucket-79382")
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	defer fs.Close()
+
+	suffix := randSuffix()
+	botUID := "bot_pat_" + suffix
+	_, _ = fs.Collection("users").Doc(botUID).Set(ctx, map[string]interface{}{
+		"username": "pat-bot-" + suffix + "[bot]",
+		"type":     "Bot",
+	})
+	t.Cleanup(func() {
+		_, _ = fs.Collection("users").Doc(botUID).Delete(context.Background())
+	})
+
+	if _, err := GeneratePAT(ctx, fs, botUID, "test pat"); err == nil {
+		t.Error("expected error when generating PAT for a bot user")
+	}
+}
+
 func TestRepositoryMetadataLifecycle(t *testing.T) {
 	emulatorHost := os.Getenv("FIRESTORE_EMULATOR_HOST")
 	if emulatorHost == "" {
