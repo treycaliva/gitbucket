@@ -23,7 +23,40 @@
   --success: #10b981;
   --error: #f43f5e;
   --warning: #f59e0b;
-  
+
+  /* --- Refresh tokens (gb-*), coexist with the above during migration --- */
+  --gb-page:        #0a0d14;
+  --gb-surface:     #0f131c;
+  --gb-surface-2:   #141926;
+  --gb-surface-3:   #1b2030;
+  --gb-hover:       rgba(255,255,255,0.035);
+
+  --gb-line:        rgba(255,255,255,0.06);
+  --gb-line-strong: rgba(255,255,255,0.11);
+  --gb-line-accent: rgba(95,199,245,0.30);
+
+  --gb-fg:          #e8edf4;
+  --gb-fg-2:        #b6bec9;
+  --gb-fg-3:        #8993a2;
+  --gb-fg-4:        #5d6678;
+
+  --gb-accent:      #5fc7f5;
+  --gb-accent-2:    #8fd7f7;
+  --gb-accent-dim:  rgba(95,199,245,0.14);
+  --gb-accent-bg:   rgba(95,199,245,0.07);
+
+  --gb-ok:          #4ade80;
+  --gb-ok-dim:      rgba(74,222,128,0.13);
+  --gb-warn:        #fbbf24;
+  --gb-warn-dim:    rgba(251,191,36,0.13);
+  --gb-err:         #f87171;
+  --gb-err-dim:     rgba(248,113,113,0.13);
+  --gb-merged:      #a78bfa;
+  --gb-merged-dim:  rgba(167,139,250,0.13);
+
+  --gb-sans: var(--font-sans);
+  --gb-mono: var(--font-mono);
+
   /* Fonts */
   --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
@@ -1418,3 +1451,50 @@ input[type="checkbox"] {
   margin-left: auto;
 }
 .latest-commit-count:hover { text-decoration: underline; }
+
+/* ===== Refresh primitives ===== */
+.gb-card {
+  background: var(--gb-surface);
+  border: 1px solid var(--gb-line);
+  border-radius: 10px;
+}
+
+.gb-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--gb-line);
+  color: var(--gb-fg-2);
+  font-weight: 500;
+  line-height: 1;
+  height: 20px;
+}
+.gb-chip.dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.gb-chip.accent { color: var(--gb-accent); border-color: var(--gb-line-accent); background: var(--gb-accent-bg); }
+.gb-chip.ok     { color: var(--gb-ok);     border-color: rgba(74,222,128,0.25);  background: var(--gb-ok-dim); }
+.gb-chip.warn   { color: var(--gb-warn);   border-color: rgba(251,191,36,0.25);  background: var(--gb-warn-dim); }
+.gb-chip.err    { color: var(--gb-err);    border-color: rgba(248,113,113,0.25); background: var(--gb-err-dim); }
+.gb-chip.merged { color: var(--gb-merged); border-color: rgba(167,139,250,0.25); background: var(--gb-merged-dim); }
+
+.gb-avatar {
+  display: inline-grid; place-items: center;
+  border-radius: 50%;
+  font-weight: 600;
+  font-family: var(--gb-mono);
+  color: #0a0d14;
+  flex-shrink: 0;
+}
+
+.gb-section-title {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 13px; font-weight: 600; color: var(--gb-fg);
+  margin-bottom: 12px;
+}
+.gb-section-title .kicker {
+  font-family: var(--gb-mono);
+  font-size: 10.5px; font-weight: 500;
+  color: var(--gb-fg-4);
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.gb-section-title .right { margin-left: auto; font-size: 12px; color: var(--gb-fg-3); font-weight: 500; }
