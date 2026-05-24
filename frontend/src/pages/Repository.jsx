@@ -4,6 +4,9 @@ import { authService } from '../authService';
 import BranchProtectionModal from '../components/BranchProtectionModal';
 import BranchTagPicker from '../components/BranchTagPicker';
 import LatestCommitBar from '../components/LatestCommitBar';
+import Card from '../components/Card';
+import Chip from '../components/Chip';
+import SectionHead from '../components/SectionHead';
 import {
   Folder,
   FileCode,
@@ -24,7 +27,9 @@ import {
   GitMerge,
   ChevronRight,
   ChevronDown,
-  Search
+  Search,
+  Hash,
+  Users
 } from 'lucide-react';
 
 function renderReadme(markdown) {
@@ -72,6 +77,153 @@ function renderReadme(markdown) {
   }).join('\n');
 
   return html;
+}
+
+const FILE_MIX_PALETTE = {
+  '.go': '#5fc7f5',
+  '.jsx': '#fbbf24', '.tsx': '#fbbf24',
+  '.js': '#fde68a', '.ts': '#fde68a', '.mjs': '#fde68a',
+  '.md': '#a78bfa',
+  '.css': '#f9a8d4', '.scss': '#f9a8d4',
+  '.sh': '#4ade80',
+  other: '#5d6678', config: '#5d6678',
+};
+const mixColor = (name) => FILE_MIX_PALETTE[name] || FILE_MIX_PALETTE.other;
+
+// Derive a top-5 + "other" file-mix from the current tree listing. No backend.
+function fileMix(treeItems) {
+  const blobs = (treeItems || []).filter((t) => t.type === 'blob');
+  if (blobs.length === 0) return { rows: [], total: 0 };
+  const byExt = {};
+  for (const it of blobs) {
+    const dot = it.name.lastIndexOf('.');
+    const ext = dot <= 0 ? 'config' : it.name.slice(dot).toLowerCase();
+    byExt[ext] = (byExt[ext] || 0) + 1;
+  }
+  const sorted = Object.entries(byExt).sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, 5);
+  const otherCount = sorted.slice(5).reduce((s, [, n]) => s + n, 0);
+  if (otherCount) top.push(['other', otherCount]);
+  return {
+    rows: top.map(([name, count]) => ({ name, count, color: mixColor(name) })),
+    total: blobs.length,
+  };
+}
+
+function AboutRailCard({ meta, collaboratorsCount, commits }) {
+  const VisIcon = meta.visibility === 'private' ? Lock : Globe;
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="ABOUT" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      {meta.description && (
+        <p style={{ fontSize: 13, color: 'var(--gb-fg-2)', lineHeight: 1.5, margin: '0 0 12px' }}>
+          {meta.description}
+        </p>
+      )}
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5, color: 'var(--gb-fg-3)' }}>
+        <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <VisIcon size={12} /> {meta.visibility}
+        </li>
+        <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <GitBranch size={12} /> {(meta.branches || []).length} branches
+          <span style={{ color: 'var(--gb-fg-4)' }}>· default</span>
+          <span className="mono" style={{ fontSize: 11.5 }}>{meta.defaultBranch || 'main'}</span>
+        </li>
+        {collaboratorsCount != null && (
+          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Users size={12} /> {collaboratorsCount + 1} collaborators
+          </li>
+        )}
+        {commits && commits.length > 0 && (
+          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Clock size={12} /> {commits.length}{commits.length >= 50 ? '+' : ''} commits loaded
+          </li>
+        )}
+      </ul>
+    </Card>
+  );
+}
+
+function FileMixCard({ mix }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="FILE MIX" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 10, background: 'var(--gb-surface-2)' }}>
+        {mix.rows.map((r) => (
+          <div key={r.name} style={{ width: `${(r.count / mix.total) * 100}%`, background: r.color }} />
+        ))}
+      </div>
+      <ul style={{ listStyle: 'none', margin: '0 0 8px', padding: 0, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 11.5 }}>
+        {mix.rows.map((r) => (
+          <li key={r.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--gb-fg-2)' }}>
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: r.color, display: 'inline-block' }} />
+            <span className="mono" style={{ fontWeight: 500 }}>{r.name}</span>
+            <span className="mono" style={{ color: 'var(--gb-fg-4)' }}>{r.count}</span>
+          </li>
+        ))}
+      </ul>
+      <div style={{ fontSize: 11, color: 'var(--gb-fg-4)' }}>
+        by file count — {mix.total} files at this ref
+      </div>
+    </Card>
+  );
+}
+
+function BranchesRailCard({ branches, defaultBranch, currentBranch, onSelect }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="BRANCHES" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {branches.map((b) => (
+          <li key={b}>
+            <button
+              type="button"
+              onClick={() => onSelect(b)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                background: b === currentBranch ? 'var(--gb-hover)' : 'transparent',
+                color: 'var(--gb-fg-2)', fontSize: 12.5, textAlign: 'left',
+              }}
+            >
+              <GitBranch size={12} style={{ color: 'var(--gb-fg-3)', flexShrink: 0 }} />
+              <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b}</span>
+              {b === defaultBranch && (
+                <span style={{ marginLeft: 'auto' }}><Chip variant="accent">default</Chip></span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function TagsRailCard({ tags }) {
+  const top = tags.slice(0, 5);
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="TAGS" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {top.map((t, i) => (
+          <li key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+            <Hash size={12} style={{ color: 'var(--gb-fg-3)', flexShrink: 0 }} />
+            <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+            {i === 0 && <span style={{ marginLeft: 'auto' }}><Chip variant="ok">latest</Chip></span>}
+          </li>
+        ))}
+      </ul>
+      <div style={{ fontSize: 11, color: 'var(--gb-fg-4)', marginTop: 10 }}>
+        Promoting tags to Releases (with body + assets) needs new backend work.
+      </div>
+    </Card>
+  );
+}
+
+// Wrapper to isolate dangerouslySetInnerHTML (content is sanitized by renderReadme)
+function ReadmeBody({ content }) {
+  const html = renderReadme(content);
+  return <div className="readme-body" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 function QuickstartCard({ cloneUrl, username }) {
@@ -147,6 +299,10 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [commitsHasMore, setCommitsHasMore] = useState(true);
   const [commitsError, setCommitsError] = useState('');
   const [readmeContent, setReadmeContent] = useState('');
+  const [tags, setTags] = useState(null);          // null = not loaded yet; [] = loaded empty
+  const [tagsError, setTagsError] = useState('');
+  const [collaboratorsCount, setCollaboratorsCount] = useState(null);
+  const mix = useMemo(() => fileMix(treeItems), [treeItems]);
   
   // States
   const [loading, setLoading] = useState(true);
@@ -249,6 +405,33 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
       .then((data) => setProtectionRules(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [owner, repo, activeTab, isOwner]);
+
+  // Load tags for Code tab (reset on branch change)
+  useEffect(() => {
+    if (activeTab !== 'code' || !currentBranch) return;
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setTags(null);
+      setTagsError('');
+      apiClient.get(`/api/repos/${owner}/${repo}/tags`)
+        .then((data) => { if (!cancelled) setTags(Array.isArray(data) ? data : []); })
+        .catch((err) => {
+          if (!cancelled) { setTagsError(err.message || 'Failed to load tags'); setTags([]); }
+        });
+    });
+    return () => { cancelled = true; };
+  }, [activeTab, owner, repo, currentBranch]);
+
+  // Load collaborators count for Code tab
+  useEffect(() => {
+    if (activeTab !== 'code') return;
+    let cancelled = false;
+    apiClient.get(`/api/repos/${owner}/${repo}/collaborators`)
+      .then((data) => { if (!cancelled) setCollaboratorsCount(Array.isArray(data) ? data.length : 0); })
+      .catch(() => { if (!cancelled) setCollaboratorsCount(null); }); // count just hides on failure
+    return () => { cancelled = true; };
+  }, [activeTab, owner, repo]);
 
   const refetchProtectionRules = async () => {
     try {
@@ -491,10 +674,10 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
         <div className="page-header">
           <div className="page-header-title">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0 }}>
-                <span style={{ color: '#94a3b8', fontWeight: 400 }}>{meta.owner}</span>
-                <span style={{ color: '#64748b', margin: '0 0.4rem', fontWeight: 300 }}>/</span>
-                <span style={{ color: '#38bdf8' }}>{meta.name}</span>
+              <h1 style={{ fontSize: '1.85rem', fontWeight: 500, margin: 0 }}>
+                <span style={{ color: 'var(--gb-fg-3)', fontWeight: 400 }}>{meta.owner}</span>
+                <span style={{ color: 'var(--gb-fg-4)', margin: '0 0.4rem', fontWeight: 300 }}>/</span>
+                <span style={{ color: 'var(--gb-fg)', fontWeight: 500 }}>{meta.name}</span>
               </h1>
               <span className={`badge badge-${meta.visibility}`} style={{ height: 'fit-content' }}>
                 {meta.visibility === 'private' ? <Lock size={12} style={{ marginRight: '0.25rem' }} /> : <Globe size={12} style={{ marginRight: '0.25rem' }} />}
@@ -506,49 +689,23 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 {meta.description}
               </p>
             )}
-          </div>
-
-          {/* HTTPS Clone Link */}
-          <div className="page-header-actions">
-            <div className="glass-card" style={{ 
-              padding: '0.5rem 1rem', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.75rem',
-              background: 'rgba(15, 23, 42, 0.4)',
-              borderRadius: '8px',
-              boxShadow: 'none'
-            }}>
-              <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>Clone HTTPS</span>
-              <input 
-                type="text" 
-                readOnly 
-                value={cloneUrl} 
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#e2e8f0',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.85rem',
-                  width: '320px',
-                  outline: 'none'
-                }}
-                onClick={copyCloneUrl}
-              />
-              <button 
-                onClick={copyCloneUrl} 
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: copied ? '#10b981' : '#38bdf8',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-                title="Copy to clipboard"
-              >
-                {copied ? <Check size={16} /> : <Copy size={16} />}
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginTop: 10, fontSize: 12.5, color: 'var(--gb-fg-3)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <GitBranch size={13} /> <span className="mono">{meta.defaultBranch || 'main'}</span>
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <GitBranch size={13} /> {(meta.branches || []).length} branches
+              </span>
+              {tags != null && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Hash size={13} /> {tags.length} tags
+                </span>
+              )}
+              {collaboratorsCount != null && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Users size={13} /> {collaboratorsCount + 1} collaborators
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -612,58 +769,68 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           {activeTab === 'code' && (
             <div>
               {/* Branch Selector and Path breadcrumbs */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '1rem',
-                flexWrap: 'wrap',
-                gap: '1rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <BranchTagPicker
-                    owner={owner}
-                    repo={repo}
-                    branches={meta.branches || []}
-                    defaultBranch={meta.defaultBranch || 'main'}
-                    currentBranch={currentBranch}
-                    onChange={(ref) => {
-                      setCurrentBranch(ref);
-                      setViewingFile(null);
-                      setFileContent('');
-                    }}
-                  />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <BranchTagPicker
+                  owner={owner}
+                  repo={repo}
+                  branches={meta.branches || []}
+                  defaultBranch={meta.defaultBranch || 'main'}
+                  currentBranch={currentBranch}
+                  onChange={(ref) => {
+                    setCurrentBranch(ref);
+                    setViewingFile(null);
+                    setFileContent('');
+                  }}
+                />
 
-                  {(currentPath || viewingFile) && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
-                      {currentPath.split('/').filter(Boolean).map((part, i, arr) => {
-                        const isLast = i === arr.length - 1 && !viewingFile;
-                        return (
-                          <React.Fragment key={i}>
-                            {i > 0 && <span style={{ color: '#64748b' }}>/</span>}
-                            <span
-                              style={{
-                                color: isLast ? '#f8fafc' : '#38bdf8',
-                                fontWeight: isLast ? 600 : 400,
-                                cursor: 'pointer',
-                              }}
-                              onClick={() => handleBreadcrumbClick(i)}
-                            >
-                              {part}
-                            </span>
-                          </React.Fragment>
-                        );
-                      })}
-                      {viewingFile && (
-                        <>
-                          {currentPath.split('/').filter(Boolean).length > 0 && <span style={{ color: '#64748b' }}>/</span>}
-                          <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-                
+                {(currentPath || viewingFile) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
+                    {currentPath.split('/').filter(Boolean).map((part, i, arr) => {
+                      const isLast = i === arr.length - 1 && !viewingFile;
+                      return (
+                        <React.Fragment key={i}>
+                          {i > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                          <span
+                            style={{
+                              color: isLast ? '#f8fafc' : '#38bdf8',
+                              fontWeight: isLast ? 600 : 400,
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => handleBreadcrumbClick(i)}
+                          >
+                            {part}
+                          </span>
+                        </React.Fragment>
+                      );
+                    })}
+                    {viewingFile && (
+                      <>
+                        {currentPath.split('/').filter(Boolean).length > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                        <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <span className="mono" style={{ fontSize: 12, color: 'var(--gb-fg-4)' }}>
+                  {(meta.branches || []).length} branches{tags != null ? ` · ${tags.length} tags` : ''}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={copyCloneUrl}
+                  title="Copy clone URL"
+                  style={{
+                    marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px', borderRadius: 7, background: 'var(--gb-surface)',
+                    border: '1px solid var(--gb-line)', fontFamily: 'var(--gb-mono)',
+                    fontSize: 12, color: 'var(--gb-fg-4)', cursor: 'pointer',
+                  }}
+                >
+                  {cloneUrl}
+                  {copied ? <Check size={13} style={{ color: 'var(--gb-accent)' }} /> : <Copy size={13} />}
+                </button>
+
                 {viewingFile && (
                   <button className="btn btn-secondary btn-icon" onClick={handleBackToFolder} style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
                     <ArrowLeft size={14} /> Back to Folder
@@ -689,119 +856,146 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 </div>
               ) : (
                 /* B. If viewing a Folder (Tree) */
-                <div>
-                  {currentBranch && (
-                    <LatestCommitBar
-                      owner={owner}
-                      repo={repo}
-                      branch={currentBranch}
-                      onViewCommits={() => onNavigate('repository', { owner, repo, tab: 'commits' })}
-                    />
-                  )}
-                  <div className="file-list">
-                    <div className="file-header">
-                      <span>Files</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 18, alignItems: 'start' }}>
+                  {/* MAIN COLUMN */}
+                  <div>
+                    {currentBranch && (
+                      <LatestCommitBar
+                        owner={owner}
+                        repo={repo}
+                        branch={currentBranch}
+                        onViewCommits={() => onNavigate('repository', { owner, repo, tab: 'commits' })}
+                      />
+                    )}
+                    <div className="file-list">
+                      <div className="file-header">
+                        <span>Files</span>
+                      </div>
+
+                      {/* Back arrow if in a subfolder */}
+                      {currentPath && (
+                        <div className="file-row" onClick={() => {
+                          const parts = currentPath.split('/');
+                          parts.pop();
+                          setCurrentPath(parts.join('/'));
+                        }}>
+                          <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
+                          <span className="file-name" style={{ color: '#38bdf8', fontWeight: 600 }}>..</span>
+                        </div>
+                      )}
+
+                      {treeItems.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b' }}>
+                          This folder (or repository) is empty. Push some code to get started!
+                        </div>
+                      ) : (
+                        <>
+                          {/* Folders first */}
+                          {treeItems.filter(item => item.type === 'tree').map(item => (
+                            <div
+                              key={item.path}
+                              className="file-row"
+                              onClick={() => handleDirectoryClick(item.path)}
+                            >
+                              <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
+                              <span className="file-name" style={{ fontWeight: 500 }}>{item.name}</span>
+                              {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                                <span style={{ display: 'inline-flex', gap: 5, flexWrap: 'wrap', marginRight: 12 }}
+                                      title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}>
+                                  {codeowners[item.name].map((o) => (
+                                    <span key={o} style={{
+                                      height: 18, lineHeight: '18px', padding: '0 7px', borderRadius: 999,
+                                      border: '1px solid var(--gb-line)', fontSize: 10.5, color: 'var(--gb-fg-3)',
+                                      fontFamily: 'var(--gb-mono)', whiteSpace: 'nowrap',
+                                    }}>{o}</span>
+                                  ))}
+                                </span>
+                              )}
+                              <span className="file-size">-</span>
+                            </div>
+                          ))}
+                          {/* Blobs second */}
+                          {treeItems.filter(item => item.type === 'blob').map(item => (
+                            <div
+                              key={item.path}
+                              className="file-row"
+                              onClick={() => handleFileClick(item)}
+                            >
+                              <span className="file-icon">
+                                {item.name.toLowerCase() === 'readme.md' ? <FileText size={18} style={{ color: '#a78bfa' }} /> : <FileCode size={18} style={{ color: '#94a3b8' }} />}
+                              </span>
+                              <span className="file-name">{item.name}</span>
+                              {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                                <span style={{ display: 'inline-flex', gap: 5, flexWrap: 'wrap', marginRight: 12 }}
+                                      title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}>
+                                  {codeowners[item.name].map((o) => (
+                                    <span key={o} style={{
+                                      height: 18, lineHeight: '18px', padding: '0 7px', borderRadius: 999,
+                                      border: '1px solid var(--gb-line)', fontSize: 10.5, color: 'var(--gb-fg-3)',
+                                      fontFamily: 'var(--gb-mono)', whiteSpace: 'nowrap',
+                                    }}>{o}</span>
+                                  ))}
+                                </span>
+                              )}
+                              <span className="file-size">{(item.size / 1024).toFixed(1)} KB</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
                     </div>
-                    
-                    {/* Back arrow if in a subfolder */}
-                    {currentPath && (
-                      <div className="file-row" onClick={() => {
-                        const parts = currentPath.split('/');
-                        parts.pop();
-                        setCurrentPath(parts.join('/'));
-                      }}>
-                        <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
-                        <span className="file-name" style={{ color: '#38bdf8', fontWeight: 600 }}>..</span>
+
+                    {/* Quickstart for empty repo (owner only) */}
+                    {isOwner && treeItems.length === 0 && !currentPath && (
+                      <div style={{ marginTop: '1.5rem' }}>
+                        <QuickstartCard cloneUrl={cloneUrl} username={user.username} />
                       </div>
                     )}
 
-                    {treeItems.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b' }}>
-                        This folder (or repository) is empty. Push some code to get started!
+                    {/* Suggest adding a README when the repo has files but none at root */}
+                    {isOwner && treeItems.length > 0 && !currentPath && !readmeContent && (
+                      <div className="glass-card" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+                        <FileText size={20} style={{ color: '#a78bfa', flexShrink: 0, marginTop: '0.15rem' }} />
+                        <div>
+                          <div style={{ fontWeight: 600, color: '#f8fafc', marginBottom: '0.35rem' }}>
+                            Help people understand your project
+                          </div>
+                          <div style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                            Add a <code style={{ fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>README.md</code> to the root of this repository to describe what it does, how to use it, and how to contribute.
+                          </div>
+                        </div>
                       </div>
-                    ) : (
-                      <>
-                        {/* Folders first */}
-                        {treeItems.filter(item => item.type === 'tree').map(item => (
-                          <div
-                            key={item.path}
-                            className="file-row"
-                            onClick={() => handleDirectoryClick(item.path)}
-                          >
-                            <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
-                            <span className="file-name" style={{ fontWeight: 500 }}>{item.name}</span>
-                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
-                              <span
-                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
-                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
-                              >
-                                {codeowners[item.name].join(' ')}
-                              </span>
-                            )}
-                            <span className="file-size">-</span>
-                          </div>
-                        ))}
-                        {/* Blobs second */}
-                        {treeItems.filter(item => item.type === 'blob').map(item => (
-                          <div
-                            key={item.path}
-                            className="file-row"
-                            onClick={() => handleFileClick(item)}
-                          >
-                            <span className="file-icon">
-                              {item.name.toLowerCase() === 'readme.md' ? <FileText size={18} style={{ color: '#a78bfa' }} /> : <FileCode size={18} style={{ color: '#94a3b8' }} />}
-                            </span>
-                            <span className="file-name">{item.name}</span>
-                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
-                              <span
-                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
-                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
-                              >
-                                {codeowners[item.name].join(' ')}
-                              </span>
-                            )}
-                            <span className="file-size">{(item.size / 1024).toFixed(1)} KB</span>
-                          </div>
-                        ))}
-                      </>
+                    )}
+
+                    {/* README Renderer */}
+                    {readmeContent && (
+                      <div className="readme-box">
+                        <div className="readme-header">
+                          <FileText size={18} style={{ color: '#a78bfa' }} />
+                          <span>README.md</span>
+                        </div>
+                        <ReadmeBody content={readmeContent} />
+                      </div>
                     )}
                   </div>
 
-                  {/* Quickstart for empty repo (owner only) */}
-                  {isOwner && treeItems.length === 0 && !currentPath && (
-                    <div style={{ marginTop: '1.5rem' }}>
-                      <QuickstartCard cloneUrl={cloneUrl} username={user.username} />
-                    </div>
-                  )}
-
-                  {/* Suggest adding a README when the repo has files but none at root */}
-                  {isOwner && treeItems.length > 0 && !currentPath && !readmeContent && (
-                    <div className="glass-card" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
-                      <FileText size={20} style={{ color: '#a78bfa', flexShrink: 0, marginTop: '0.15rem' }} />
-                      <div>
-                        <div style={{ fontWeight: 600, color: '#f8fafc', marginBottom: '0.35rem' }}>
-                          Help people understand your project
-                        </div>
-                        <div style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.5 }}>
-                          Add a <code style={{ fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>README.md</code> to the root of this repository to describe what it does, how to use it, and how to contribute.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* README Renderer */}
-                  {readmeContent && (
-                    <div className="readme-box">
-                      <div className="readme-header">
-                        <FileText size={18} style={{ color: '#a78bfa' }} />
-                        <span>README.md</span>
-                      </div>
-                      <div 
-                        className="readme-body"
-                        dangerouslySetInnerHTML={{ __html: renderReadme(readmeContent) }}
-                      />
-                    </div>
-                  )}
+                  {/* RIGHT RAIL */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <AboutRailCard meta={meta} collaboratorsCount={collaboratorsCount} commits={commits} />
+                    {mix.total > 0 && <FileMixCard mix={mix} />}
+                    <BranchesRailCard
+                      branches={meta.branches || []}
+                      defaultBranch={meta.defaultBranch || 'main'}
+                      currentBranch={currentBranch}
+                      onSelect={(b) => { setCurrentBranch(b); setViewingFile(null); setFileContent(''); }}
+                    />
+                    {tags && tags.length > 0 && <TagsRailCard tags={tags} />}
+                    {tagsError && (!tags || tags.length === 0) && (
+                      <Card style={{ padding: 16 }}>
+                        <SectionHead kicker="TAGS" title="" />
+                        <div style={{ fontSize: 12, color: 'var(--gb-err)' }}>{tagsError}</div>
+                      </Card>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
