@@ -412,6 +412,22 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [insightsRules, setInsightsRules] = useState([]);
   const [codeownersRoot, setCodeownersRoot] = useState({}); // { childName: ["@a", ...] }
 
+  // Record this repo visit for the Dashboard "Recently visited" rail
+  // (gitbucket.recent = JSON array of "owner/repo" slugs, most-recent-first).
+  useEffect(() => {
+    if (!owner || !repo) return;
+    try {
+      const KEY = 'gitbucket.recent';
+      const slug = `${owner}/${repo}`;
+      const prev = JSON.parse(localStorage.getItem(KEY) || '[]');
+      const arr = (Array.isArray(prev) ? prev : []).filter((s) => s !== slug);
+      arr.unshift(slug);
+      localStorage.setItem(KEY, JSON.stringify(arr.slice(0, 10)));
+    } catch {
+      // localStorage unavailable / malformed — non-critical, ignore
+    }
+  }, [owner, repo]);
+
   useEffect(() => {
     if (meta) {
       Promise.resolve().then(() => {
