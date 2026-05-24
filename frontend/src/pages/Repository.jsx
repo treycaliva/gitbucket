@@ -783,17 +783,17 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
     <div>
       {/* 1. Repository Title & Header Info */}
       <div style={{ marginBottom: '2rem' }}>
-        <button 
-          onClick={() => onNavigate('dashboard')} 
-          style={{ 
-            background: 'none', 
-            border: 'none', 
-            color: '#94a3b8', 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.25rem',
+        <button
+          onClick={() => onNavigate('dashboard')}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--gb-fg-2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
             cursor: 'pointer',
-            fontSize: '0.9rem',
+            fontSize: 13,
             fontWeight: 500,
             marginBottom: '0.75rem'
           }}
@@ -801,42 +801,36 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           <ArrowLeft size={14} /> Back to dashboard
         </button>
 
-        <div className="page-header">
-          <div className="page-header-title">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: 18, fontWeight: 500, margin: 0 }}>
-                <span style={{ color: 'var(--gb-fg-3)', fontWeight: 400 }}>{meta.owner}</span>
-                <span style={{ color: 'var(--gb-fg-4)', margin: '0 0.4rem', fontWeight: 300 }}>/</span>
-                <span style={{ color: 'var(--gb-accent)', fontWeight: 600 }}>{meta.name}</span>
-              </h1>
-              <span className={`badge badge-${meta.visibility}`} style={{ height: 'fit-content' }}>
-                {meta.visibility === 'private' ? <Lock size={12} style={{ marginRight: '0.25rem' }} /> : <Globe size={12} style={{ marginRight: '0.25rem' }} />}
-                {meta.visibility}
+        <div className="gb-repo-header" style={{ paddingLeft: 0, paddingRight: 0 }}>
+          <h1 className="title">
+            <span className="owner">{meta.owner}</span>
+            <span className="slash">/</span>
+            <span className="repo">{meta.name}</span>
+            <span className="gb-chip" style={{ marginLeft: 4 }}>
+              {meta.visibility === 'private' ? <Lock size={11} /> : <Globe size={11} />}
+              {meta.visibility}
+            </span>
+          </h1>
+          {meta.description && (
+            <p className="desc">{meta.description}</p>
+          )}
+          <div className="stats">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <GitBranch size={13} color="var(--gb-fg-3)" /> <span className="mono" style={{ fontSize: 11.5 }}>{meta.defaultBranch || 'main'}</span>
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <GitBranch size={13} color="var(--gb-fg-3)" /> {(meta.branches || []).length} branches
+            </span>
+            {tags != null && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Hash size={13} color="var(--gb-fg-3)" /> {tags.length} tags
               </span>
-            </div>
-            {meta.description && (
-              <p style={{ color: '#94a3b8', marginTop: '0.5rem', fontSize: '0.95rem', maxWidth: '800px', lineHeight: '1.4' }}>
-                {meta.description}
-              </p>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginTop: 10, fontSize: 12.5, color: 'var(--gb-fg-3)' }}>
+            {collaboratorsCount != null && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <GitBranch size={13} /> <span className="mono">{meta.defaultBranch || 'main'}</span>
+                <Users size={13} color="var(--gb-fg-3)" /> {collaboratorsCount + 1} collaborators
               </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <GitBranch size={13} /> {(meta.branches || []).length} branches
-              </span>
-              {tags != null && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <Hash size={13} /> {tags.length} tags
-                </span>
-              )}
-              {collaboratorsCount != null && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <Users size={13} /> {collaboratorsCount + 1} collaborators
-                </span>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
