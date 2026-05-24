@@ -4,6 +4,11 @@ import { authService } from '../authService';
 import BranchProtectionModal from '../components/BranchProtectionModal';
 import BranchTagPicker from '../components/BranchTagPicker';
 import LatestCommitBar from '../components/LatestCommitBar';
+import Card from '../components/Card';
+import Chip from '../components/Chip';
+import SectionHead from '../components/SectionHead';
+import Avatar from '../components/Avatar';
+import { formatRelative } from '../utils/relativeTime';
 import {
   Folder,
   FileCode,
@@ -24,8 +29,80 @@ import {
   GitMerge,
   ChevronRight,
   ChevronDown,
-  Search
+  Search,
+  Hash,
+  Users,
+  Activity,
+  GitCommit,
+  Tag,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  MessageSquareText,
 } from 'lucide-react';
+
+// --- Task 5: PR detail helpers ---
+function globMatch(pattern, value) {
+  if (!pattern) return false;
+  const re = new RegExp('^' + pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]') + '$');
+  return re.test(value);
+}
+function getMatchingRule(rules, targetBranch) {
+  if (!Array.isArray(rules) || !targetBranch) return null;
+  const wildcardCount = (p) => [...p].filter((c) => c === '*' || c === '?').length;
+  const sorted = [...rules].sort((a, b) => {
+    const wa = wildcardCount(a.pattern), wb = wildcardCount(b.pattern);
+    if (wa !== wb) return wa - wb;                       // fewer wildcards = more specific
+    if (a.pattern.length !== b.pattern.length) return b.pattern.length - a.pattern.length; // longer = more specific
+    return a.pattern < b.pattern ? -1 : 1;              // lexicographic tiebreak
+  });
+  return sorted.find((r) => globMatch(r.pattern, targetBranch)) || null;
+}
+function buildReviewerList(requestedReviewers, reviews) {
+  const byUser = new Map();
+  for (const username of (requestedReviewers || [])) {
+    byUser.set(username.toLowerCase(), { username, status: 'pending', role: 'Requested · CODEOWNERS' });
+  }
+  for (const r of (reviews || [])) {
+    const key = r.username.toLowerCase();
+    byUser.set(key, { username: r.username, status: r.state, submittedAt: r.submittedAt, body: r.body, role: byUser.get(key)?.role || 'Reviewer' });
+  }
+  return [...byUser.values()];
+}
+function approvalsProgress(rule, reviews) {
+  if (!rule) return null;
+  const distinct = new Map();
+  for (const r of (reviews || [])) distinct.set(r.username.toLowerCase(), r);
+  const vals = [...distinct.values()];
+  const given = vals.filter(r => r.state === 'approved').length;
+  const changesRequested = vals.filter(r => r.state === 'changes_requested').map(r => r.username);
+  return {
+    required: rule.requireApprovals || 0,
+    given,
+    changesRequested,
+    codeownersRequired: !!rule.requireCodeownerApproval,
+    satisfied: given >= (rule.requireApprovals || 0) && changesRequested.length === 0,
+  };
+}
+function reviewMeta(status) {
+  switch (status) {
+    case 'approved':          return { variant: 'ok',  Icon: CheckCircle2,      color: 'var(--gb-ok)',   label: 'Approved' };
+    case 'changes_requested': return { variant: 'err', Icon: XCircle,           color: 'var(--gb-err)',  label: 'Changes requested' };
+    case 'commented':         return { variant: 'default', Icon: MessageSquareText, color: 'var(--gb-fg-3)', label: 'Commented' };
+    default:                  return { variant: 'warn', Icon: Clock,            color: 'var(--gb-warn)', label: 'Pending' };
+  }
+}
+function buildStatusMeta(overallStatus) {
+  const s = (overallStatus || '').toUpperCase();
+  if (s === 'SUCCESS')
+    return { variant: 'ok',  Icon: CheckCircle2,  color: 'var(--gb-ok)',   bg: 'var(--gb-ok-dim)',   chip: 'SUCCESS', title: 'Build passing on head commit' };
+  if (s === 'FAILURE' || s === 'TIMEOUT' || s === 'CANCELLED')
+    return { variant: 'err', Icon: AlertTriangle, color: 'var(--gb-err)',  bg: 'var(--gb-err-dim)',  chip: s,        title: `Build ${s.toLowerCase()} on head commit` };
+  return { variant: 'warn', Icon: Clock, color: 'var(--gb-warn)', bg: 'var(--gb-warn-dim)', chip: s || 'PENDING', title: 'Build pending — no status reported' };
+}
 
 function renderReadme(markdown) {
   if (!markdown) return '';
@@ -74,9 +151,155 @@ function renderReadme(markdown) {
   return html;
 }
 
+const FILE_MIX_PALETTE = {
+  '.go': '#5fc7f5',
+  '.jsx': '#fbbf24', '.tsx': '#fbbf24',
+  '.js': '#fde68a', '.ts': '#fde68a', '.mjs': '#fde68a',
+  '.md': '#a78bfa',
+  '.css': '#f9a8d4', '.scss': '#f9a8d4',
+  '.sh': '#4ade80',
+  other: '#5d6678', config: '#5d6678',
+};
+const mixColor = (name) => FILE_MIX_PALETTE[name] || FILE_MIX_PALETTE.other;
+
+// Derive a top-5 + "other" file-mix from the current tree listing. No backend.
+function fileMix(treeItems) {
+  const blobs = (treeItems || []).filter((t) => t.type === 'blob');
+  if (blobs.length === 0) return { rows: [], total: 0 };
+  const byExt = {};
+  for (const it of blobs) {
+    const dot = it.name.lastIndexOf('.');
+    const ext = dot <= 0 ? 'config' : it.name.slice(dot).toLowerCase();
+    byExt[ext] = (byExt[ext] || 0) + 1;
+  }
+  const sorted = Object.entries(byExt).sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, 5);
+  const otherCount = sorted.slice(5).reduce((s, [, n]) => s + n, 0);
+  if (otherCount) top.push(['other', otherCount]);
+  return {
+    rows: top.map(([name, count]) => ({ name, count, color: mixColor(name) })),
+    total: blobs.length,
+  };
+}
+
+function AboutRailCard({ meta, collaboratorsCount, commits }) {
+  const VisIcon = meta.visibility === 'private' ? Lock : Globe;
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="ABOUT" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      {meta.description && (
+        <p style={{ fontSize: 13, color: 'var(--gb-fg-2)', lineHeight: 1.5, margin: '0 0 12px' }}>
+          {meta.description}
+        </p>
+      )}
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5, color: 'var(--gb-fg-3)' }}>
+        <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <VisIcon size={12} /> {meta.visibility}
+        </li>
+        <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <GitBranch size={12} /> {(meta.branches || []).length} branches
+          <span style={{ color: 'var(--gb-fg-4)' }}>· default</span>
+          <span className="mono" style={{ fontSize: 11.5 }}>{meta.defaultBranch || 'main'}</span>
+        </li>
+        {collaboratorsCount != null && (
+          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Users size={12} /> {collaboratorsCount + 1} collaborators
+          </li>
+        )}
+        {commits && commits.length > 0 && (
+          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Clock size={12} /> {commits.length}{commits.length >= 50 ? '+' : ''} commits loaded
+          </li>
+        )}
+      </ul>
+    </Card>
+  );
+}
+
+function FileMixCard({ mix }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="FILE MIX" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 10, background: 'var(--gb-surface-2)' }}>
+        {mix.rows.map((r) => (
+          <div key={r.name} style={{ width: `${(r.count / mix.total) * 100}%`, background: r.color }} />
+        ))}
+      </div>
+      <ul style={{ listStyle: 'none', margin: '0 0 8px', padding: 0, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 11.5 }}>
+        {mix.rows.map((r) => (
+          <li key={r.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--gb-fg-2)' }}>
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: r.color, display: 'inline-block' }} />
+            <span className="mono" style={{ fontWeight: 500 }}>{r.name}</span>
+            <span className="mono" style={{ color: 'var(--gb-fg-4)' }}>{r.count}</span>
+          </li>
+        ))}
+      </ul>
+      <div style={{ fontSize: 11, color: 'var(--gb-fg-4)' }}>
+        by file count — {mix.total} files at this ref
+      </div>
+    </Card>
+  );
+}
+
+function BranchesRailCard({ branches, defaultBranch, currentBranch, onSelect }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="BRANCHES" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {branches.map((b) => (
+          <li key={b}>
+            <button
+              type="button"
+              onClick={() => onSelect(b)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                background: b === currentBranch ? 'var(--gb-hover)' : 'transparent',
+                color: 'var(--gb-fg-2)', fontSize: 12.5, textAlign: 'left',
+              }}
+            >
+              <GitBranch size={12} style={{ color: 'var(--gb-fg-3)', flexShrink: 0 }} />
+              <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b}</span>
+              {b === defaultBranch && (
+                <span style={{ marginLeft: 'auto' }}><Chip variant="accent">default</Chip></span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function TagsRailCard({ tags }) {
+  const top = tags.slice(0, 5);
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="TAGS" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {top.map((t) => (
+          <li key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+            <Hash size={12} style={{ color: 'var(--gb-fg-3)', flexShrink: 0 }} />
+            <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+          </li>
+        ))}
+      </ul>
+      <div style={{ fontSize: 11, color: 'var(--gb-fg-4)', marginTop: 10 }}>
+        Promoting tags to Releases (with body + assets) needs new backend work.
+      </div>
+    </Card>
+  );
+}
+
+// Wrapper to isolate dangerouslySetInnerHTML (content is sanitized by renderReadme)
+function ReadmeBody({ content }) {
+  const html = renderReadme(content);
+  return <div className="readme-body" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 function QuickstartCard({ cloneUrl, username }) {
   return (
-    <div className="glass-card">
+    <div style={{ background: 'var(--gb-surface)', border: '1px solid var(--gb-line)', borderRadius: 10, padding: '1.5rem' }}>
       <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Repository Command Quickstart</h3>
       <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
         Configure your local command-line client to push and pull from this repository:
@@ -147,6 +370,10 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [commitsHasMore, setCommitsHasMore] = useState(true);
   const [commitsError, setCommitsError] = useState('');
   const [readmeContent, setReadmeContent] = useState('');
+  const [tags, setTags] = useState(null);          // null = not loaded yet; [] = loaded empty
+  const [tagsError, setTagsError] = useState('');
+  const [collaboratorsCount, setCollaboratorsCount] = useState(null);
+  const mix = useMemo(() => fileMix(treeItems), [treeItems]);
   
   // States
   const [loading, setLoading] = useState(true);
@@ -175,6 +402,31 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [protectionError, setProtectionError] = useState('');
   const [showProtectionModal, setShowProtectionModal] = useState(false);
   const [editingRule, setEditingRule] = useState(null); // null => create mode
+
+  // Insights-only state
+  const [insightsLoaded, setInsightsLoaded] = useState(false);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsPulls, setInsightsPulls] = useState([]);
+  const [insightsCommits, setInsightsCommits] = useState([]);
+  const [insightsCollaborators, setInsightsCollaborators] = useState([]);
+  const [insightsRules, setInsightsRules] = useState([]);
+  const [codeownersRoot, setCodeownersRoot] = useState({}); // { childName: ["@a", ...] }
+
+  // Record this repo visit for the Dashboard "Recently visited" rail
+  // (gitbucket.recent = JSON array of "owner/repo" slugs, most-recent-first).
+  useEffect(() => {
+    if (!owner || !repo) return;
+    try {
+      const KEY = 'gitbucket.recent';
+      const slug = `${owner}/${repo}`;
+      const prev = JSON.parse(localStorage.getItem(KEY) || '[]');
+      const arr = (Array.isArray(prev) ? prev : []).filter((s) => s !== slug);
+      arr.unshift(slug);
+      localStorage.setItem(KEY, JSON.stringify(arr.slice(0, 10)));
+    } catch {
+      // localStorage unavailable / malformed — non-critical, ignore
+    }
+  }, [owner, repo]);
 
   useEffect(() => {
     if (meta) {
@@ -249,6 +501,67 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
       .then((data) => setProtectionRules(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [owner, repo, activeTab, isOwner]);
+
+  // Lazy Insights fetch — fires once per repo when Insights first opens
+  useEffect(() => {
+    if (activeTab !== 'insights' || insightsLoaded) return;
+    const branch = currentBranch || meta?.defaultBranch || 'main';
+    if (!branch) return;
+
+    let cancelled = false;
+    Promise.resolve().then(() => { setInsightsLoading(true); });
+    const safe = (p, fallback) => p.then((d) => d).catch(() => fallback);
+    const coParams = new URLSearchParams({ path: '', ref: branch });
+
+    Promise.all([
+      safe(apiClient.get(`/api/repos/${owner}/${repo}/commits/${branch}?limit=${COMMITS_PAGE_SIZE}&offset=0`), []),
+      safe(apiClient.get(`/api/repos/${owner}/${repo}/tags`), []),
+      safe(apiClient.get(`/api/repos/${owner}/${repo}/pulls`), []),
+      safe(apiClient.get(`/api/repos/${owner}/${repo}/collaborators`), []),
+      isOwner
+        ? safe(apiClient.get(`/api/repos/${owner}/${repo}/branch-protection`), [])
+        : Promise.resolve([]),
+      safe(apiClient.get(`/api/repos/${owner}/${repo}/codeowners?${coParams.toString()}`), { entries: {} }),
+    ]).then(([commitList, tagList, pullList, collabList, rules, co]) => {
+      if (cancelled) return;
+      setInsightsCommits(Array.isArray(commitList) ? commitList : []);
+      setTags(Array.isArray(tagList) ? tagList : []);
+      setInsightsPulls(Array.isArray(pullList) ? pullList : []);
+      setInsightsCollaborators(Array.isArray(collabList) ? collabList : []);
+      setInsightsRules(Array.isArray(rules) ? rules : []);
+      setCodeownersRoot((co && co.entries) || {});
+      setInsightsLoaded(true);
+      setInsightsLoading(false);
+    }).catch(() => {
+      if (!cancelled) setInsightsLoading(false);
+      // leave insightsLoaded false so a retry is possible on next activation
+    });
+
+    return () => { cancelled = true; };
+  }, [activeTab, insightsLoaded, owner, repo, currentBranch, meta?.defaultBranch, isOwner]);
+
+  // Load tags for Code tab (reset on branch change)
+  useEffect(() => {
+    if (activeTab !== 'code' || !currentBranch) return;
+    let cancelled = false;
+    Promise.resolve().then(() => { setTags(null); setTagsError(''); });
+    apiClient.get(`/api/repos/${owner}/${repo}/tags`)
+      .then((data) => { if (!cancelled) setTags(Array.isArray(data) ? data : []); })
+      .catch((err) => {
+        if (!cancelled) { setTagsError(err.message || 'Failed to load tags'); setTags([]); }
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, owner, repo, currentBranch]);
+
+  // Load collaborators count for Code tab
+  useEffect(() => {
+    if (activeTab !== 'code') return;
+    let cancelled = false;
+    apiClient.get(`/api/repos/${owner}/${repo}/collaborators`)
+      .then((data) => { if (!cancelled) setCollaboratorsCount(Array.isArray(data) ? data.length : 0); })
+      .catch(() => { if (!cancelled) setCollaboratorsCount(null); }); // count just hides on failure
+    return () => { cancelled = true; };
+  }, [activeTab, owner, repo]);
 
   const refetchProtectionRules = async () => {
     try {
@@ -491,10 +804,10 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
         <div className="page-header">
           <div className="page-header-title">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0 }}>
-                <span style={{ color: '#94a3b8', fontWeight: 400 }}>{meta.owner}</span>
-                <span style={{ color: '#64748b', margin: '0 0.4rem', fontWeight: 300 }}>/</span>
-                <span style={{ color: '#38bdf8' }}>{meta.name}</span>
+              <h1 style={{ fontSize: 18, fontWeight: 500, margin: 0 }}>
+                <span style={{ color: 'var(--gb-fg-3)', fontWeight: 400 }}>{meta.owner}</span>
+                <span style={{ color: 'var(--gb-fg-4)', margin: '0 0.4rem', fontWeight: 300 }}>/</span>
+                <span style={{ color: 'var(--gb-accent)', fontWeight: 600 }}>{meta.name}</span>
               </h1>
               <span className={`badge badge-${meta.visibility}`} style={{ height: 'fit-content' }}>
                 {meta.visibility === 'private' ? <Lock size={12} style={{ marginRight: '0.25rem' }} /> : <Globe size={12} style={{ marginRight: '0.25rem' }} />}
@@ -506,49 +819,23 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 {meta.description}
               </p>
             )}
-          </div>
-
-          {/* HTTPS Clone Link */}
-          <div className="page-header-actions">
-            <div className="glass-card" style={{ 
-              padding: '0.5rem 1rem', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '0.75rem',
-              background: 'rgba(15, 23, 42, 0.4)',
-              borderRadius: '8px',
-              boxShadow: 'none'
-            }}>
-              <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>Clone HTTPS</span>
-              <input 
-                type="text" 
-                readOnly 
-                value={cloneUrl} 
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#e2e8f0',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.85rem',
-                  width: '320px',
-                  outline: 'none'
-                }}
-                onClick={copyCloneUrl}
-              />
-              <button 
-                onClick={copyCloneUrl} 
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: copied ? '#10b981' : '#38bdf8',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-                title="Copy to clipboard"
-              >
-                {copied ? <Check size={16} /> : <Copy size={16} />}
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginTop: 10, fontSize: 12.5, color: 'var(--gb-fg-3)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <GitBranch size={13} /> <span className="mono">{meta.defaultBranch || 'main'}</span>
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <GitBranch size={13} /> {(meta.branches || []).length} branches
+              </span>
+              {tags != null && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Hash size={13} /> {tags.length} tags
+                </span>
+              )}
+              {collaboratorsCount != null && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Users size={13} /> {collaboratorsCount + 1} collaborators
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -570,15 +857,32 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           <Clock size={18} />
           Commits
         </button>
-        <button 
+        <button
           className={`tab ${activeTab === 'pulls' || activeTab === 'pull_detail' ? 'active' : ''}`}
           onClick={() => onNavigate('pulls', { owner, repo })}
         >
           <GitPullRequest size={18} />
           Pull Requests
         </button>
+        <button
+          className={`tab ${activeTab === 'insights' ? 'active' : ''}`}
+          onClick={() => onNavigate('repository', { owner, repo, tab: 'insights' })}
+        >
+          <Activity size={18} />
+          Insights
+          <span
+            style={{
+              marginLeft: '0.4rem', fontFamily: 'var(--gb-mono)', fontSize: '9.5px',
+              letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--gb-accent)',
+              background: 'var(--gb-accent-bg)', border: '1px solid var(--gb-line-accent)',
+              borderRadius: '4px', padding: '0.05rem 0.3rem', lineHeight: 1.4,
+            }}
+          >
+            New
+          </span>
+        </button>
         {isOwner && (
-          <button 
+          <button
             className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => onNavigate('repository', { owner, repo, tab: 'settings' })}
           >
@@ -612,58 +916,68 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           {activeTab === 'code' && (
             <div>
               {/* Branch Selector and Path breadcrumbs */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '1rem',
-                flexWrap: 'wrap',
-                gap: '1rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <BranchTagPicker
-                    owner={owner}
-                    repo={repo}
-                    branches={meta.branches || []}
-                    defaultBranch={meta.defaultBranch || 'main'}
-                    currentBranch={currentBranch}
-                    onChange={(ref) => {
-                      setCurrentBranch(ref);
-                      setViewingFile(null);
-                      setFileContent('');
-                    }}
-                  />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <BranchTagPicker
+                  owner={owner}
+                  repo={repo}
+                  branches={meta.branches || []}
+                  defaultBranch={meta.defaultBranch || 'main'}
+                  currentBranch={currentBranch}
+                  onChange={(ref) => {
+                    setCurrentBranch(ref);
+                    setViewingFile(null);
+                    setFileContent('');
+                  }}
+                />
 
-                  {(currentPath || viewingFile) && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
-                      {currentPath.split('/').filter(Boolean).map((part, i, arr) => {
-                        const isLast = i === arr.length - 1 && !viewingFile;
-                        return (
-                          <React.Fragment key={i}>
-                            {i > 0 && <span style={{ color: '#64748b' }}>/</span>}
-                            <span
-                              style={{
-                                color: isLast ? '#f8fafc' : '#38bdf8',
-                                fontWeight: isLast ? 600 : 400,
-                                cursor: 'pointer',
-                              }}
-                              onClick={() => handleBreadcrumbClick(i)}
-                            >
-                              {part}
-                            </span>
-                          </React.Fragment>
-                        );
-                      })}
-                      {viewingFile && (
-                        <>
-                          {currentPath.split('/').filter(Boolean).length > 0 && <span style={{ color: '#64748b' }}>/</span>}
-                          <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-                
+                {(currentPath || viewingFile) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.95rem' }}>
+                    {currentPath.split('/').filter(Boolean).map((part, i, arr) => {
+                      const isLast = i === arr.length - 1 && !viewingFile;
+                      return (
+                        <React.Fragment key={i}>
+                          {i > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                          <span
+                            style={{
+                              color: isLast ? '#f8fafc' : '#38bdf8',
+                              fontWeight: isLast ? 600 : 400,
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => handleBreadcrumbClick(i)}
+                          >
+                            {part}
+                          </span>
+                        </React.Fragment>
+                      );
+                    })}
+                    {viewingFile && (
+                      <>
+                        {currentPath.split('/').filter(Boolean).length > 0 && <span style={{ color: '#64748b' }}>/</span>}
+                        <span style={{ color: '#f8fafc', fontWeight: 600 }}>{viewingFile.name}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <span className="mono" style={{ fontSize: 12, color: 'var(--gb-fg-4)' }}>
+                  {(meta.branches || []).length} branches{tags != null ? ` · ${tags.length} tags` : ''}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={copyCloneUrl}
+                  title="Copy clone URL"
+                  style={{
+                    marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px', borderRadius: 7, background: 'var(--gb-surface)',
+                    border: '1px solid var(--gb-line)', fontFamily: 'var(--gb-mono)',
+                    fontSize: 12, color: 'var(--gb-fg-4)', cursor: 'pointer', maxWidth: 320,
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{cloneUrl}</span>
+                  {copied ? <Check size={13} style={{ color: 'var(--gb-accent)' }} /> : <Copy size={13} />}
+                </button>
+
                 {viewingFile && (
                   <button className="btn btn-secondary btn-icon" onClick={handleBackToFolder} style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
                     <ArrowLeft size={14} /> Back to Folder
@@ -689,119 +1003,146 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                 </div>
               ) : (
                 /* B. If viewing a Folder (Tree) */
-                <div>
-                  {currentBranch && (
-                    <LatestCommitBar
-                      owner={owner}
-                      repo={repo}
-                      branch={currentBranch}
-                      onViewCommits={() => onNavigate('repository', { owner, repo, tab: 'commits' })}
-                    />
-                  )}
-                  <div className="file-list">
-                    <div className="file-header">
-                      <span>Files</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 18, alignItems: 'start' }}>
+                  {/* MAIN COLUMN */}
+                  <div>
+                    {currentBranch && (
+                      <LatestCommitBar
+                        owner={owner}
+                        repo={repo}
+                        branch={currentBranch}
+                        onViewCommits={() => onNavigate('repository', { owner, repo, tab: 'commits' })}
+                      />
+                    )}
+                    <div className="file-list">
+                      <div className="file-header">
+                        <span>Files</span>
+                      </div>
+
+                      {/* Back arrow if in a subfolder */}
+                      {currentPath && (
+                        <div className="file-row" onClick={() => {
+                          const parts = currentPath.split('/');
+                          parts.pop();
+                          setCurrentPath(parts.join('/'));
+                        }}>
+                          <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
+                          <span className="file-name" style={{ color: '#38bdf8', fontWeight: 600 }}>..</span>
+                        </div>
+                      )}
+
+                      {treeItems.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b' }}>
+                          This folder (or repository) is empty. Push some code to get started!
+                        </div>
+                      ) : (
+                        <>
+                          {/* Folders first */}
+                          {treeItems.filter(item => item.type === 'tree').map(item => (
+                            <div
+                              key={item.path}
+                              className="file-row"
+                              onClick={() => handleDirectoryClick(item.path)}
+                            >
+                              <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
+                              <span className="file-name" style={{ fontWeight: 500 }}>{item.name}</span>
+                              {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                                <span style={{ display: 'inline-flex', gap: 5, flexWrap: 'wrap', marginRight: 12 }}
+                                      title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}>
+                                  {codeowners[item.name].map((o) => (
+                                    <span key={o} style={{
+                                      height: 18, lineHeight: '18px', padding: '0 7px', borderRadius: 999,
+                                      border: '1px solid var(--gb-line)', fontSize: 10.5, color: 'var(--gb-fg-3)',
+                                      fontFamily: 'var(--gb-mono)', whiteSpace: 'nowrap',
+                                    }}>{o}</span>
+                                  ))}
+                                </span>
+                              )}
+                              <span className="file-size">-</span>
+                            </div>
+                          ))}
+                          {/* Blobs second */}
+                          {treeItems.filter(item => item.type === 'blob').map(item => (
+                            <div
+                              key={item.path}
+                              className="file-row"
+                              onClick={() => handleFileClick(item)}
+                            >
+                              <span className="file-icon">
+                                {item.name.toLowerCase() === 'readme.md' ? <FileText size={18} style={{ color: '#a78bfa' }} /> : <FileCode size={18} style={{ color: '#94a3b8' }} />}
+                              </span>
+                              <span className="file-name">{item.name}</span>
+                              {codeowners[item.name] && codeowners[item.name].length > 0 && (
+                                <span style={{ display: 'inline-flex', gap: 5, flexWrap: 'wrap', marginRight: 12 }}
+                                      title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}>
+                                  {codeowners[item.name].map((o) => (
+                                    <span key={o} style={{
+                                      height: 18, lineHeight: '18px', padding: '0 7px', borderRadius: 999,
+                                      border: '1px solid var(--gb-line)', fontSize: 10.5, color: 'var(--gb-fg-3)',
+                                      fontFamily: 'var(--gb-mono)', whiteSpace: 'nowrap',
+                                    }}>{o}</span>
+                                  ))}
+                                </span>
+                              )}
+                              <span className="file-size">{(item.size / 1024).toFixed(1)} KB</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
                     </div>
-                    
-                    {/* Back arrow if in a subfolder */}
-                    {currentPath && (
-                      <div className="file-row" onClick={() => {
-                        const parts = currentPath.split('/');
-                        parts.pop();
-                        setCurrentPath(parts.join('/'));
-                      }}>
-                        <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
-                        <span className="file-name" style={{ color: '#38bdf8', fontWeight: 600 }}>..</span>
+
+                    {/* Quickstart for empty repo (owner only) */}
+                    {isOwner && treeItems.length === 0 && !currentPath && (
+                      <div style={{ marginTop: '1.5rem' }}>
+                        <QuickstartCard cloneUrl={cloneUrl} username={user.username} />
                       </div>
                     )}
 
-                    {treeItems.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b' }}>
-                        This folder (or repository) is empty. Push some code to get started!
+                    {/* Suggest adding a README when the repo has files but none at root */}
+                    {isOwner && treeItems.length > 0 && !currentPath && !readmeContent && (
+                      <div className="glass-card" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
+                        <FileText size={20} style={{ color: '#a78bfa', flexShrink: 0, marginTop: '0.15rem' }} />
+                        <div>
+                          <div style={{ fontWeight: 600, color: '#f8fafc', marginBottom: '0.35rem' }}>
+                            Help people understand your project
+                          </div>
+                          <div style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                            Add a <code style={{ fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>README.md</code> to the root of this repository to describe what it does, how to use it, and how to contribute.
+                          </div>
+                        </div>
                       </div>
-                    ) : (
-                      <>
-                        {/* Folders first */}
-                        {treeItems.filter(item => item.type === 'tree').map(item => (
-                          <div
-                            key={item.path}
-                            className="file-row"
-                            onClick={() => handleDirectoryClick(item.path)}
-                          >
-                            <span className="file-icon"><Folder size={18} style={{ color: '#38bdf8' }} /></span>
-                            <span className="file-name" style={{ fontWeight: 500 }}>{item.name}</span>
-                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
-                              <span
-                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
-                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
-                              >
-                                {codeowners[item.name].join(' ')}
-                              </span>
-                            )}
-                            <span className="file-size">-</span>
-                          </div>
-                        ))}
-                        {/* Blobs second */}
-                        {treeItems.filter(item => item.type === 'blob').map(item => (
-                          <div
-                            key={item.path}
-                            className="file-row"
-                            onClick={() => handleFileClick(item)}
-                          >
-                            <span className="file-icon">
-                              {item.name.toLowerCase() === 'readme.md' ? <FileText size={18} style={{ color: '#a78bfa' }} /> : <FileCode size={18} style={{ color: '#94a3b8' }} />}
-                            </span>
-                            <span className="file-name">{item.name}</span>
-                            {codeowners[item.name] && codeowners[item.name].length > 0 && (
-                              <span
-                                style={{ color: '#64748b', fontSize: '0.85rem', marginRight: '0.85rem' }}
-                                title={`CODEOWNERS: ${codeowners[item.name].join(', ')}`}
-                              >
-                                {codeowners[item.name].join(' ')}
-                              </span>
-                            )}
-                            <span className="file-size">{(item.size / 1024).toFixed(1)} KB</span>
-                          </div>
-                        ))}
-                      </>
+                    )}
+
+                    {/* README Renderer */}
+                    {readmeContent && (
+                      <div className="readme-box">
+                        <div className="readme-header">
+                          <FileText size={18} style={{ color: '#a78bfa' }} />
+                          <span>README.md</span>
+                        </div>
+                        <ReadmeBody content={readmeContent} />
+                      </div>
                     )}
                   </div>
 
-                  {/* Quickstart for empty repo (owner only) */}
-                  {isOwner && treeItems.length === 0 && !currentPath && (
-                    <div style={{ marginTop: '1.5rem' }}>
-                      <QuickstartCard cloneUrl={cloneUrl} username={user.username} />
-                    </div>
-                  )}
-
-                  {/* Suggest adding a README when the repo has files but none at root */}
-                  {isOwner && treeItems.length > 0 && !currentPath && !readmeContent && (
-                    <div className="glass-card" style={{ marginTop: '1.5rem', display: 'flex', gap: '0.85rem', alignItems: 'flex-start' }}>
-                      <FileText size={20} style={{ color: '#a78bfa', flexShrink: 0, marginTop: '0.15rem' }} />
-                      <div>
-                        <div style={{ fontWeight: 600, color: '#f8fafc', marginBottom: '0.35rem' }}>
-                          Help people understand your project
-                        </div>
-                        <div style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: 1.5 }}>
-                          Add a <code style={{ fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>README.md</code> to the root of this repository to describe what it does, how to use it, and how to contribute.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* README Renderer */}
-                  {readmeContent && (
-                    <div className="readme-box">
-                      <div className="readme-header">
-                        <FileText size={18} style={{ color: '#a78bfa' }} />
-                        <span>README.md</span>
-                      </div>
-                      <div 
-                        className="readme-body"
-                        dangerouslySetInnerHTML={{ __html: renderReadme(readmeContent) }}
-                      />
-                    </div>
-                  )}
+                  {/* RIGHT RAIL */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <AboutRailCard meta={meta} collaboratorsCount={collaboratorsCount} commits={commits} />
+                    {mix.total > 0 && <FileMixCard mix={mix} />}
+                    <BranchesRailCard
+                      branches={meta.branches || []}
+                      defaultBranch={meta.defaultBranch || 'main'}
+                      currentBranch={currentBranch}
+                      onSelect={(b) => { setCurrentBranch(b); setViewingFile(null); setFileContent(''); }}
+                    />
+                    {tags && tags.length > 0 && <TagsRailCard tags={tags} />}
+                    {tagsError && (!tags || tags.length === 0) && (
+                      <Card style={{ padding: 16 }}>
+                        <SectionHead kicker="TAGS" title="" />
+                        <div style={{ fontSize: 12, color: 'var(--gb-err)' }}>{tagsError}</div>
+                      </Card>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1202,6 +1543,24 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
             </div>
           )}
 
+          {/* Insights Tab */}
+          {activeTab === 'insights' && (
+            <InsightsTab
+              meta={meta}
+              commits={insightsCommits}
+              tags={tags}
+              pulls={insightsPulls}
+              collaborators={insightsCollaborators}
+              protectionRules={insightsRules}
+              codeownersRoot={codeownersRoot}
+              isOwner={isOwner}
+              loading={insightsLoading || !insightsLoaded}
+              onNavigate={onNavigate}
+              owner={owner}
+              repo={repo}
+            />
+          )}
+
           {/* Pull Requests Tab */}
           {activeTab === 'pulls' && (
             <PullRequestList owner={owner} repo={repo} onNavigate={onNavigate} />
@@ -1232,6 +1591,324 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
         />
       )}
     </div>
+  );
+}
+
+// ==========================================
+// Task 5: PR Detail Sub-components
+// ==========================================
+
+function ApprovalsCallout({ approvals, matchingRule, mergeAllowed, onMerge, merging }) {
+  const meta = !matchingRule
+    ? { Icon: CheckCircle2, color: 'var(--gb-ok)', bg: 'var(--gb-ok-dim)' }
+    : approvals.satisfied
+      ? { Icon: CheckCircle2, color: 'var(--gb-ok)', bg: 'var(--gb-ok-dim)' }
+      : approvals.changesRequested.length
+        ? { Icon: XCircle, color: 'var(--gb-err)', bg: 'var(--gb-err-dim)' }
+        : { Icon: Clock, color: 'var(--gb-warn)', bg: 'var(--gb-warn-dim)' };
+  const Bubble = meta.Icon;
+  const headline = !matchingRule ? 'No approvals required' : `Approvals · ${approvals.given} of ${approvals.required}`;
+  const subhead = !matchingRule
+    ? 'No protection rule applies — anyone with write access can merge.'
+    : [
+        `Rule for ${matchingRule.pattern} requires ${approvals.required} approval${approvals.required === 1 ? '' : 's'}${approvals.codeownersRequired ? ' + CODEOWNERS' : ''}`,
+        approvals.changesRequested.length ? `changes requested by ${approvals.changesRequested.map(u => '@' + u).join(', ')}` : null,
+      ].filter(Boolean).join(' · ');
+  return (
+    <Card style={{ padding: 0, marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px' }}>
+        <div style={{ width: 36, height: 36, borderRadius: '50%', background: meta.bg, color: meta.color, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Bubble size={18} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gb-fg)' }}>{headline}</div>
+          <div style={{ fontSize: 12, color: 'var(--gb-fg-3)' }}>{subhead}</div>
+        </div>
+        <button type="button" onClick={onMerge} disabled={!mergeAllowed || merging}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 6, fontSize: 13, border: '1px solid var(--gb-line)', background: 'var(--gb-surface-2)', color: 'var(--gb-fg)', cursor: mergeAllowed && !merging ? 'pointer' : 'not-allowed', opacity: mergeAllowed && !merging ? 1 : 0.6, flexShrink: 0 }}>
+          <GitMerge size={13} /> {merging ? 'Merging…' : 'Merge pull request'}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function BuildCallout({ meta, headCommit, buildId, owner, repo, onNavigate }) {
+  const short = headCommit.sha.substring(0, 7);
+  const isFail = meta.variant === 'err';
+  const Bubble = meta.Icon;
+  return (
+    <Card style={{ padding: 0, marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px' }}>
+        <div style={{ width: 36, height: 36, borderRadius: '50%', background: meta.bg, color: meta.color, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Bubble size={18} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gb-fg)' }}>{meta.title}</div>
+          <div style={{ fontSize: 12, color: 'var(--gb-fg-3)' }}>
+            <span style={{ fontFamily: 'var(--gb-mono)' }}>{short}</span> · status: {meta.chip}
+            {isFail && buildId && (
+              <>
+                {' · '}
+                <a role="button" tabIndex={0}
+                   onClick={() => onNavigate('build_logs', { owner, repo, sha: headCommit.sha, buildId })}
+                   style={{ color: 'var(--gb-err)', textDecoration: 'underline', cursor: 'pointer' }}>view build logs →</a>
+              </>
+            )}
+          </div>
+        </div>
+        <Chip variant={meta.variant}>{meta.chip}</Chip>
+      </div>
+    </Card>
+  );
+}
+
+function ReviewerRail({ reviewers }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="REVIEWERS" title="" />
+      {reviewers.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--gb-fg-3)' }}>No reviewers yet.</div>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {reviewers.map(r => {
+            const m = reviewMeta(r.status);
+            const RowIcon = m.Icon;
+            return (
+              <li key={r.username} style={{ display: 'grid', gridTemplateColumns: '22px 1fr 14px', gap: 9, alignItems: 'center' }}>
+                <Avatar name={r.username} size={22} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.username}</span>
+                    <span style={{ fontSize: 10.5, color: m.color, fontWeight: 500, flexShrink: 0 }}>· {m.label}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--gb-fg-4)' }}>{r.role}</div>
+                </div>
+                <RowIcon size={13} color={m.color} strokeWidth={2.4} />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function RuleMatchedCard({ rule, targetBranch }) {
+  if (!rule) return null;
+  const lines = [
+    rule.requirePullRequest ? 'PR required' : null,
+    rule.requireApprovals > 0 ? `${rule.requireApprovals} approval${rule.requireApprovals === 1 ? '' : 's'} required` : null,
+    rule.requireCodeownerApproval ? 'CODEOWNERS review required' : null,
+    (rule.blockForcePush || rule.blockDeletion)
+      ? `No ${[rule.blockForcePush && 'force-push', rule.blockDeletion && 'delete'].filter(Boolean).join(', no ')}`
+      : null,
+  ].filter(Boolean);
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="RULE MATCHED" title="" />
+      <div style={{ fontSize: 12, color: 'var(--gb-fg-3)', marginBottom: 8 }}>
+        Target <span style={{ fontFamily: 'var(--gb-mono)' }}>{targetBranch}</span> matches protection rule
+        {' '}<span style={{ fontFamily: 'var(--gb-mono)' }}>{rule.pattern}</span>:
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {lines.map((l, i) => (
+          <li key={i} style={{ fontSize: 12.5, color: 'var(--gb-fg-2)' }}>
+            <span style={{ color: 'var(--gb-fg-4)', marginRight: 6 }}>·</span>{l}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function CommitsList({ commits }) {
+  return (
+    <Card style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--gb-line)', background: 'var(--gb-surface-2)' }}>
+        <SectionHead kicker="COMMITS" title="" right={<span style={{ fontSize: 11, color: 'var(--gb-fg-4)' }}>{commits.length}</span>} />
+      </div>
+      {commits.length === 0 ? (
+        <div style={{ padding: '24px', textAlign: 'center', fontSize: 12.5, color: 'var(--gb-fg-3)' }}>No commits in this pull request.</div>
+      ) : commits.map((c, i) => (
+        <div key={c.sha} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto auto', gap: 10, alignItems: 'center', padding: '10px 14px', borderTop: i === 0 ? 'none' : '1px solid var(--gb-line)' }}>
+          <Avatar name={c.authorName} size={22} />
+          <span style={{ fontSize: 13, color: 'var(--gb-fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(c.message || '').split('\n')[0]}</span>
+          <code style={{ fontFamily: 'var(--gb-mono)', fontSize: 11.5, color: 'var(--gb-accent)', background: 'var(--gb-accent-bg)', padding: '1px 6px', borderRadius: 3 }}>{c.sha.substring(0, 7)}</code>
+          <span style={{ fontSize: 11, color: 'var(--gb-fg-4)' }}>{new Date(c.date).toLocaleDateString()}</span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+// ==========================================
+// Insights Tab Components
+// ==========================================
+
+function InsightsTab({
+  meta, commits, tags, pulls, collaborators, protectionRules,
+  codeownersRoot, isOwner, loading, owner, repo, onNavigate,
+}) {
+  const branchCount = (meta?.branches || []).length;
+  const tagCount = (tags || []).length;
+  const openPrCount = (pulls || []).filter((p) => p.status === 'open').length;
+  const collabCount = (collaborators || []).length;
+  const ruleCount = (protectionRules || []).length;
+  const commitCount = (commits || []).length;
+  const commitLabel = commitCount >= COMMITS_PAGE_SIZE ? `${commitCount}+` : `${commitCount}`;
+
+  const stats = [
+    { kicker: 'COMMITS', value: commitLabel, icon: <GitCommit size={13} /> },
+    { kicker: 'BRANCHES', value: `${branchCount}`, icon: <GitBranch size={13} /> },
+    { kicker: 'TAGS', value: `${tagCount}`, icon: <Tag size={13} /> },
+    { kicker: 'OPEN PRs', value: `${openPrCount}`, icon: <GitPullRequest size={13} /> },
+    { kicker: 'COLLABS', value: `${collabCount + 1}`, icon: <Users size={13} /> },
+    { kicker: 'PROT. RULES', value: isOwner ? `${ruleCount}` : '—', icon: <ShieldCheck size={13} /> },
+  ];
+
+  if (loading) {
+    return <div className="loader-container"><div className="loader"></div></div>;
+  }
+
+  const coEntries = Object.entries(codeownersRoot || {});
+  const recentCommits = (commits || []).slice(0, 8);
+  const defaultBranch = meta?.defaultBranch || 'main';
+
+  return (
+    <div style={{ fontFamily: 'var(--gb-sans)' }}>
+      <SectionHead kicker="OVERVIEW" title="Repository at a glance" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginTop: 12, marginBottom: 22 }}>
+        {stats.map((s) => (
+          <div key={s.kicker} style={{ padding: 14, background: 'var(--gb-surface)', border: '1px solid var(--gb-line)', borderRadius: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--gb-mono)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--gb-fg-4)', marginBottom: 6 }}>
+              {s.icon}{s.kicker}
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--gb-fg)' }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
+        <RecentCommitsPanel commits={recentCommits} owner={owner} repo={repo} onNavigate={onNavigate} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <CollaboratorsPanel meta={meta} collaborators={collaborators} />
+          <ProtectionPanel rules={protectionRules} isOwner={isOwner} />
+          <CodeownersPanel entries={coEntries} branch={defaultBranch} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecentCommitsPanel({ commits, owner, repo, onNavigate }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="RECENT" title="Last 8 commits" />
+      {commits.length === 0 ? (
+        <div style={{ color: 'var(--gb-fg-4)', fontSize: 12.5, padding: '8px 0' }}>No commits yet.</div>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {commits.map((c) => (
+            <li key={c.sha}
+                onClick={() => onNavigate('commit', { owner, repo, sha: c.sha })}
+                style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto auto', gap: 10, alignItems: 'center', padding: '10px 0', cursor: 'pointer' }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--gb-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+              <Avatar name={c.authorName} size={22} />
+              <span style={{ minWidth: 0, display: 'flex', gap: 7, alignItems: 'baseline' }}>
+                <strong style={{ fontSize: 12.5, color: 'var(--gb-fg)', whiteSpace: 'nowrap' }}>{c.authorName}</strong>
+                <span style={{ fontSize: 12, color: 'var(--gb-fg-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.message}</span>
+              </span>
+              <span style={{ fontFamily: 'var(--gb-mono)', fontSize: 11.5, color: 'var(--gb-fg-4)' }}>{c.sha.slice(0, 7)}</span>
+              <span style={{ fontSize: 11, color: 'var(--gb-fg-4)', whiteSpace: 'nowrap' }}>{formatRelative(c.date)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function CollaboratorsPanel({ meta, collaborators }) {
+  const ownerName = meta?.owner || '';
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="COLLABORATORS" title="" />
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {ownerName && (
+          <li key="__owner" style={{ display: 'grid', gridTemplateColumns: '24px 1fr auto', gap: 10, alignItems: 'center', padding: '9px 0' }}>
+            <Avatar name={ownerName} size={24} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--gb-fg)' }}>{ownerName}</span>
+            <Chip variant="accent">owner</Chip>
+          </li>
+        )}
+        {(collaborators || []).map((c) => (
+          <li key={c.uid || c.username} style={{ display: 'grid', gridTemplateColumns: '24px 1fr auto auto', gap: 10, alignItems: 'center', padding: '9px 0', borderTop: '1px solid var(--gb-line)' }}>
+            <Avatar name={c.username} size={24} />
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--gb-fg-2)' }}>{c.username}</span>
+            <span style={{ fontSize: 11, color: 'var(--gb-fg-4)', whiteSpace: 'nowrap' }}>{c.addedAt ? formatRelative(c.addedAt) : ''}</span>
+            <Chip variant="default">collaborator</Chip>
+          </li>
+        ))}
+        {ownerName && (collaborators || []).length === 0 && (
+          <li style={{ fontSize: 12, color: 'var(--gb-fg-4)', padding: '9px 0', borderTop: '1px solid var(--gb-line)' }}>No additional collaborators.</li>
+        )}
+      </ul>
+    </Card>
+  );
+}
+
+function ProtectionPanel({ rules, isOwner }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="BRANCH PROTECTION" title="" />
+      {!isOwner ? (
+        <div style={{ fontSize: 12, color: 'var(--gb-fg-4)' }}>Branch protection settings are visible to repo owners only.</div>
+      ) : (rules || []).length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--gb-fg-4)' }}>No protection rules defined.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {rules.map((rule) => (
+            <div key={rule.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: 'var(--gb-mono)', fontSize: 12, color: 'var(--gb-fg)' }}>{rule.pattern}</span>
+                <span style={{ fontFamily: 'var(--gb-mono)', fontSize: 11, color: 'var(--gb-fg-4)' }}>
+                  push:{(rule.pushAllowlist || []).length} · merge:{(rule.mergeAllowlist || []).length}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {rule.requirePullRequest && <Chip variant="accent">PR required</Chip>}
+                {rule.requireApprovals > 0 && <Chip variant="accent">{rule.requireApprovals} approval{rule.requireApprovals === 1 ? '' : 's'}</Chip>}
+                {rule.requireCodeownerApproval && <Chip variant="accent">CODEOWNERS</Chip>}
+                {rule.blockForcePush && <Chip variant="accent">no force-push</Chip>}
+                {rule.blockDeletion && <Chip variant="accent">no delete</Chip>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function CodeownersPanel({ entries, branch }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="CODEOWNERS" title="" right={<span style={{ fontFamily: 'var(--gb-mono)', fontSize: 10.5, color: 'var(--gb-fg-4)' }}>{branch}</span>} />
+      {(entries || []).length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--gb-fg-4)' }}>No CODEOWNERS rules on default branch.</div>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {entries.map(([name, ownersList]) => (
+            <li key={name} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'baseline', fontFamily: 'var(--gb-mono)', fontSize: 11.5 }}>
+              <span style={{ color: 'var(--gb-fg-2)' }}>{name}/</span>
+              <span style={{ color: 'var(--gb-fg-3)', textAlign: 'right' }}>{(ownersList || []).join(' ')}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -1731,6 +2408,9 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
   const [reviewSubmitting, setReviewSubmitting] = useState('');
   const [reviewBody, setReviewBody] = useState('');
 
+  // Branch protection rules for PR detail
+  const [prProtectionRules, setPrProtectionRules] = useState([]);
+
   const isOwner = user && user.username && user.username.toLowerCase() === owner.toLowerCase();
   const isPrAuthor = user && user.username && pr && pr.authorUsername && user.username.toLowerCase() === pr.authorUsername.toLowerCase();
 
@@ -1763,17 +2443,19 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
       setLoading(true);
       setError('');
       try {
-        const [prData, commitsData, diffData, reviewsData] = await Promise.all([
+        const [prData, commitsData, diffData, reviewsData, rulesData] = await Promise.all([
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}`),
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/commits`).catch(() => []),
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' })),
-          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`).catch(() => [])
+          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`).catch(() => []),
+          apiClient.get(`/api/repos/${owner}/${repo}/branch-protection`).catch(() => []),
         ]);
 
         setPr(prData);
         setCommits(commitsData || []);
         setDiff(diffData?.rawDiff || '');
         setReviews(Array.isArray(reviewsData) ? reviewsData : []);
+        setPrProtectionRules(Array.isArray(rulesData) ? rulesData : []);
 
         const saved = localStorage.getItem(`pr_comments_${owner}_${repo}_${prNumber}`);
         if (saved) {
@@ -1893,6 +2575,17 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 		}
 	};
 
+  // Task 5: Derived hook values for approvals/build callouts.
+  // Hooks must run unconditionally on every render, BEFORE any early return.
+  // Hoist the pr-derived inputs into plain consts first so the useMemo dependency
+  // arrays reference simple identifiers (the React Compiler rejects optional-chaining
+  // member expressions in dep arrays). Null-tolerant helpers keep these safe while pr is null.
+  const prTargetBranch = pr ? pr.targetBranch : undefined;
+  const prRequestedReviewers = pr ? pr.requestedReviewers : undefined;
+  const matchingRule = useMemo(() => getMatchingRule(prProtectionRules, prTargetBranch), [prProtectionRules, prTargetBranch]);
+  const approvals = useMemo(() => approvalsProgress(matchingRule, reviews), [matchingRule, reviews]);
+  const reviewerList = useMemo(() => buildReviewerList(prRequestedReviewers, reviews), [prRequestedReviewers, reviews]);
+
   if (loading) {
     return (
       <div className="loader-container">
@@ -1918,17 +2611,20 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     );
   }
 
-  let badgeColor = '#38bdf8'; // open
   let statusBadgeClass = 'badge-pr-open';
   if (pr.status === 'merged') {
-    badgeColor = '#a855f7';
     statusBadgeClass = 'badge-pr-merged';
   } else if (pr.status === 'closed') {
-    badgeColor = '#ef4444';
     statusBadgeClass = 'badge-pr-closed';
   }
 
-
+  // Task 5: Non-hook derived consts (pr is guaranteed non-null past the guard above).
+  const headCommit = commits[0] || null;
+  const buildMeta = buildStatusMeta(headCommit?.overallStatus);
+  const headBuildId = headCommit?.statuses?.[0]?.buildId || null;
+  const approvalsOk = !matchingRule || (approvals && approvals.satisfied);
+  const mergeAllowed = pr.mergeable === true && approvalsOk;
+  const isOpen = pr.status === 'open';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -2098,6 +2794,14 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
               </div>
             </form>
 
+            {/* Task 5: Approvals + Build callouts (ADDITIVE — above the existing merge box) */}
+            {isOpen && (
+              <ApprovalsCallout approvals={approvals} matchingRule={matchingRule} mergeAllowed={mergeAllowed} onMerge={handleMerge} merging={actionLoading} />
+            )}
+            {isOpen && headCommit && (
+              <BuildCallout meta={buildMeta} headCommit={headCommit} buildId={headBuildId} owner={owner} repo={repo} onNavigate={onNavigate} />
+            )}
+
             {/* Merge box at bottom */}
             {pr.status === 'open' && (
               <div className="pr-merge-box" style={{
@@ -2162,7 +2866,7 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                     <button 
                       className="btn btn-primary" 
                       onClick={handleMerge}
-                      disabled={actionLoading || pr.mergeable !== true}
+                      disabled={actionLoading || pr.mergeable !== true || !approvalsOk}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                     >
                       {actionLoading ? (
@@ -2294,175 +2998,62 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 
           {/* Right Column: Metadata / info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {/* Reviewers */}
-            <div className="glass-card" style={{ padding: '1.25rem' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Reviewers</h3>
-              {(() => {
-                // Build a single ordered list:
-                //   1) requestedReviewers (in their declared order)
-                //   2) any users who have submitted a review but are NOT in #1
-                // For each, look up the latest review (if any) to render their state.
-                const requested = Array.isArray(pr.requestedReviewers) ? pr.requestedReviewers : [];
-                const byUsername = new Map();
-                for (const rv of reviews) {
-                  // ListReviews orders ascending by submittedAt, so later entries win.
-                  byUsername.set(rv.username.toLowerCase(), rv);
-                }
-                const requestedLower = new Set(requested.map(u => u.toLowerCase()));
-                const adhoc = [];
-                for (const rv of reviews) {
-                  if (!requestedLower.has(rv.username.toLowerCase())) {
-                    adhoc.push(rv.username);
-                  }
-                }
-                // De-dupe adhoc (multiple reviews per user collapse).
-                const seen = new Set();
-                const adhocUnique = adhoc.filter(u => {
-                  const k = u.toLowerCase();
-                  if (seen.has(k)) return false;
-                  seen.add(k);
-                  return true;
-                });
-                const all = [...requested, ...adhocUnique];
+            {/* Task 5: ReviewerRail replaces the old IIFE reviewer list */}
+            <ReviewerRail reviewers={reviewerList} />
 
-                if (all.length === 0) {
-                  return (
-                    <div style={{ color: '#64748b', fontSize: '0.85rem' }}>
-                      No reviewers requested.
-                    </div>
-                  );
-                }
-
-                const stateLabel = (s) => {
-                  if (s === 'approved') return { text: '✓ approved', color: '#10b981' };
-                  if (s === 'changes_requested') return { text: '✕ changes requested', color: '#f43f5e' };
-                  if (s === 'commented') return { text: 'commented', color: '#94a3b8' };
-                  return { text: '– pending', color: '#64748b' };
-                };
-
-                return (
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {all.map(username => {
-                      const rv = byUsername.get(username.toLowerCase());
-                      const s = stateLabel(rv && rv.state);
-                      return (
-                        <li
-                          key={username}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            fontSize: '0.9rem',
-                          }}
-                        >
-                          <span style={{ color: '#e2e8f0' }}>@{username}</span>
-                          <span style={{ color: s.color, fontSize: '0.85rem', fontWeight: 500 }}>{s.text}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                );
-              })()}
-
-              {/* Reviewer action buttons (visible to signed-in non-author on open PRs) */}
-              {user && pr.status === 'open' && !isPrAuthor && (
-                <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                  <textarea
-                    className="text-input"
-                    placeholder="Leave a note with your review (optional)"
-                    value={reviewBody}
-                    onChange={(e) => setReviewBody(e.target.value)}
-                    style={{ width: '100%', minHeight: '60px', marginBottom: '0.75rem', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.85rem' }}
-                  />
-                  {reviewError && (
-                    <div style={{ color: '#ef4444', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{reviewError}</div>
-                  )}
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => handleSubmitReview('approved')}
-                      disabled={!!reviewSubmitting}
-                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
-                    >
-                      {reviewSubmitting === 'approved' ? 'Approving…' : 'Approve'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => handleSubmitReview('changes_requested')}
-                      disabled={!!reviewSubmitting}
-                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
-                    >
-                      {reviewSubmitting === 'changes_requested' ? 'Submitting…' : 'Request changes'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => handleSubmitReview('commented')}
-                      disabled={!!reviewSubmitting}
-                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
-                    >
-                      {reviewSubmitting === 'commented' ? 'Submitting…' : 'Comment'}
-                    </button>
-                  </div>
+            {/* Review action form (preserved — visible to signed-in non-author on open PRs) */}
+            {user && pr.status === 'open' && !isPrAuthor && (
+              <Card style={{ padding: '1.25rem' }}>
+                <textarea
+                  className="text-input"
+                  placeholder="Leave a note with your review (optional)"
+                  value={reviewBody}
+                  onChange={(e) => setReviewBody(e.target.value)}
+                  style={{ width: '100%', minHeight: '60px', marginBottom: '0.75rem', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.85rem' }}
+                />
+                {reviewError && (
+                  <div style={{ color: '#ef4444', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{reviewError}</div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleSubmitReview('approved')}
+                    disabled={!!reviewSubmitting}
+                    style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                  >
+                    {reviewSubmitting === 'approved' ? 'Approving…' : 'Approve'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleSubmitReview('changes_requested')}
+                    disabled={!!reviewSubmitting}
+                    style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                  >
+                    {reviewSubmitting === 'changes_requested' ? 'Submitting…' : 'Request changes'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleSubmitReview('commented')}
+                    disabled={!!reviewSubmitting}
+                    style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                  >
+                    {reviewSubmitting === 'commented' ? 'Submitting…' : 'Comment'}
+                  </button>
                 </div>
-              )}
-            </div>
+              </Card>
+            )}
 
-            <div className="glass-card" style={{ padding: '1.25rem' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Review Status</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Status</span>
-                  <span style={{ color: badgeColor, fontWeight: 600, textTransform: 'uppercase' }}>{pr.status}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Branches</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: '#94a3b8' }}>
-                    {pr.sourceBranch} &rarr; {pr.targetBranch}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Created</span>
-                  <span style={{ color: '#e2e8f0' }}>{new Date(pr.createdAt).toLocaleDateString()}</span>
-                </div>
-              </div>
-            </div>
+            {/* Task 5: RuleMatchedCard replaces the old "Review Status" glass-card */}
+            <RuleMatchedCard rule={matchingRule} targetBranch={pr.targetBranch} />
           </div>
         </div>
       )}
 
       {prTab === 'commits' && (
-        <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', margin: 0 }}>Commits ({commits.length})</h3>
-          </div>
-          <div>
-            {commits.length === 0 ? (
-              <div style={{ color: '#64748b', fontStyle: 'italic', padding: '2rem', textAlign: 'center' }}>No commits found.</div>
-            ) : (
-              commits.map(c => (
-                <div key={c.sha} className="commit-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <span className="commit-message" style={{ fontSize: '0.95rem', margin: 0 }}>{c.message}</span>
-                    </div>
-                    <div className="commit-meta">
-                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>@{c.authorName}</span>
-                      <span>committed on {new Date(c.date).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <code style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600, background: 'rgba(56,189,248,0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>
-                      {c.sha.substring(0, 8)}
-                    </code>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        <CommitsList commits={commits} />
       )}
 
       {prTab === 'diff' && (

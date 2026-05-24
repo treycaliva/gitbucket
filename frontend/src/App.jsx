@@ -17,6 +17,7 @@ import BuildLogs from './pages/BuildLogs';
 import SettingsAppsNew from './pages/SettingsAppsNew';
 import SettingsAppsInstall from './pages/SettingsAppsInstall';
 import SettingsApps from './pages/SettingsApps';
+import Profile from './pages/Profile';
 
 const parseLocation = () => {
   const path = window.location.pathname;
@@ -104,6 +105,14 @@ const parseLocation = () => {
   // Must appear BEFORE the 2-segment /:owner/:repo branch.
   if (segments.length === 2 && segments[0] === 'settings' && segments[1] === 'apps') {
     return { page: 'apps_list', params: {} };
+  }
+
+  // 5b. User Profile (new)
+  // Pattern: /u/:username — MUST appear BEFORE the 2-segment /:owner/:repo branch.
+  // Safe to reserve "u": username regex ^[a-zA-Z0-9-]{3,20}$ (min 3 chars) means a
+  // single-char first segment can never be a real owner.
+  if (segments.length === 2 && segments[0] === 'u') {
+    return { page: 'profile', params: { username: segments[1] } };
   }
 
   // 6. Repository Details & Tabs
@@ -213,6 +222,8 @@ export default function App() {
       url = `/settings/apps/${slug}/installations/new`;
     } else if (page === 'apps_list') {
       url = '/settings/apps';
+    } else if (page === 'profile') {
+      url = `/u/${params.username}`;
     }
 
     if (replace) {
@@ -296,6 +307,10 @@ export default function App() {
         return <SettingsAppsInstall slug={navigation.params.slug} onNavigate={navigate} />;
       case 'apps_list':
         return <SettingsApps onNavigate={navigate} />;
+      case 'profile':
+        return (
+          <Profile user={user} username={navigation.params.username} onNavigate={navigate} />
+        );
       case 'pulls':
         return (
           <Repository 
