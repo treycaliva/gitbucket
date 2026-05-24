@@ -341,6 +341,9 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   const [insightsLoaded, setInsightsLoaded] = useState(false);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsPulls, setInsightsPulls] = useState([]);
+  const [insightsCommits, setInsightsCommits] = useState([]);
+  const [insightsCollaborators, setInsightsCollaborators] = useState([]);
+  const [insightsRules, setInsightsRules] = useState([]);
   const [codeownersRoot, setCodeownersRoot] = useState({}); // { childName: ["@a", ...] }
 
   useEffect(() => {
@@ -439,18 +442,21 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
       safe(apiClient.get(`/api/repos/${owner}/${repo}/codeowners?${coParams.toString()}`), { entries: {} }),
     ]).then(([commitList, tagList, pullList, collabList, rules, co]) => {
       if (cancelled) return;
-      setCommits(Array.isArray(commitList) ? commitList : []);
+      setInsightsCommits(Array.isArray(commitList) ? commitList : []);
       setTags(Array.isArray(tagList) ? tagList : []);
       setInsightsPulls(Array.isArray(pullList) ? pullList : []);
-      setCollaborators(Array.isArray(collabList) ? collabList : []);
-      setProtectionRules(Array.isArray(rules) ? rules : []);
+      setInsightsCollaborators(Array.isArray(collabList) ? collabList : []);
+      setInsightsRules(Array.isArray(rules) ? rules : []);
       setCodeownersRoot((co && co.entries) || {});
       setInsightsLoaded(true);
       setInsightsLoading(false);
+    }).catch(() => {
+      if (!cancelled) setInsightsLoading(false);
+      // leave insightsLoaded false so a retry is possible on next activation
     });
 
     return () => { cancelled = true; };
-  }, [activeTab, insightsLoaded, owner, repo, currentBranch, meta, isOwner]);
+  }, [activeTab, insightsLoaded, owner, repo, currentBranch, meta?.defaultBranch, isOwner]);
 
   // Load tags for Code tab (reset on branch change)
   useEffect(() => {
@@ -1459,11 +1465,11 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
           {activeTab === 'insights' && (
             <InsightsTab
               meta={meta}
-              commits={commits}
+              commits={insightsCommits}
               tags={tags}
               pulls={insightsPulls}
-              collaborators={collaborators}
-              protectionRules={protectionRules}
+              collaborators={insightsCollaborators}
+              protectionRules={insightsRules}
               codeownersRoot={codeownersRoot}
               isOwner={isOwner}
               loading={insightsLoading || !insightsLoaded}
@@ -1527,7 +1533,7 @@ function InsightsTab({
     { kicker: 'BRANCHES', value: `${branchCount}`, icon: <GitBranch size={13} /> },
     { kicker: 'TAGS', value: `${tagCount}`, icon: <Tag size={13} /> },
     { kicker: 'OPEN PRs', value: `${openPrCount}`, icon: <GitPullRequest size={13} /> },
-    { kicker: 'COLLABS', value: `${collabCount}`, icon: <Users size={13} /> },
+    { kicker: 'COLLABS', value: `${collabCount + 1}`, icon: <Users size={13} /> },
     { kicker: 'PROT. RULES', value: isOwner ? `${ruleCount}` : '—', icon: <ShieldCheck size={13} /> },
   ];
 
