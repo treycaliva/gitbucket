@@ -228,7 +228,7 @@ function ReadmeBody({ content }) {
 
 function QuickstartCard({ cloneUrl, username }) {
   return (
-    <div className="glass-card">
+    <div style={{ background: 'var(--gb-surface)', border: '1px solid var(--gb-line)', borderRadius: 10, padding: '1.5rem' }}>
       <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: '#38bdf8' }}>Repository Command Quickstart</h3>
       <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1rem' }}>
         Configure your local command-line client to push and pull from this repository:
@@ -410,16 +410,12 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
   useEffect(() => {
     if (activeTab !== 'code' || !currentBranch) return;
     let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) return;
-      setTags(null);
-      setTagsError('');
-      apiClient.get(`/api/repos/${owner}/${repo}/tags`)
-        .then((data) => { if (!cancelled) setTags(Array.isArray(data) ? data : []); })
-        .catch((err) => {
-          if (!cancelled) { setTagsError(err.message || 'Failed to load tags'); setTags([]); }
-        });
-    });
+    Promise.resolve().then(() => { setTags(null); setTagsError(''); });
+    apiClient.get(`/api/repos/${owner}/${repo}/tags`)
+      .then((data) => { if (!cancelled) setTags(Array.isArray(data) ? data : []); })
+      .catch((err) => {
+        if (!cancelled) { setTagsError(err.message || 'Failed to load tags'); setTags([]); }
+      });
     return () => { cancelled = true; };
   }, [activeTab, owner, repo, currentBranch]);
 
@@ -674,10 +670,10 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
         <div className="page-header">
           <div className="page-header-title">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: '1.85rem', fontWeight: 500, margin: 0 }}>
+              <h1 style={{ fontSize: 18, fontWeight: 500, margin: 0 }}>
                 <span style={{ color: 'var(--gb-fg-3)', fontWeight: 400 }}>{meta.owner}</span>
                 <span style={{ color: 'var(--gb-fg-4)', margin: '0 0.4rem', fontWeight: 300 }}>/</span>
-                <span style={{ color: 'var(--gb-fg)', fontWeight: 500 }}>{meta.name}</span>
+                <span style={{ color: 'var(--gb-accent)', fontWeight: 600 }}>{meta.name}</span>
               </h1>
               <span className={`badge badge-${meta.visibility}`} style={{ height: 'fit-content' }}>
                 {meta.visibility === 'private' ? <Lock size={12} style={{ marginRight: '0.25rem' }} /> : <Globe size={12} style={{ marginRight: '0.25rem' }} />}
