@@ -2105,17 +2105,17 @@ function NewPullRequest({ owner, repo, meta, onNavigate }) {
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div>
-        <button 
-          onClick={() => onNavigate('pulls', { owner, repo })} 
-          style={{ 
-            background: 'none', 
-            border: 'none', 
-            color: '#94a3b8', 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.25rem',
+        <button
+          onClick={() => onNavigate('pulls', { owner, repo })}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--gb-fg-2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
             cursor: 'pointer',
-            fontSize: '0.9rem',
+            fontSize: 13,
             fontWeight: 500,
             marginBottom: '0.75rem',
             padding: 0
@@ -2605,13 +2605,6 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     );
   }
 
-  let statusBadgeClass = 'badge-pr-open';
-  if (pr.status === 'merged') {
-    statusBadgeClass = 'badge-pr-merged';
-  } else if (pr.status === 'closed') {
-    statusBadgeClass = 'badge-pr-closed';
-  }
-
   // Task 5: Non-hook derived consts (pr is guaranteed non-null past the guard above).
   const headCommit = commits[0] || null;
   const buildMeta = buildStatusMeta(headCommit?.overallStatus);
@@ -2624,17 +2617,17 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Header Info */}
       <div>
-        <button 
-          onClick={() => onNavigate('pulls', { owner, repo })} 
-          style={{ 
-            background: 'none', 
-            border: 'none', 
-            color: '#94a3b8', 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.25rem',
+        <button
+          onClick={() => onNavigate('pulls', { owner, repo })}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--gb-fg-2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
             cursor: 'pointer',
-            fontSize: '0.9rem',
+            fontSize: 13,
             fontWeight: 500,
             marginBottom: '0.75rem',
             padding: 0
@@ -2642,22 +2635,24 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
         >
           <ArrowLeft size={14} /> Back to Pull Requests
         </button>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '0 0 0.5rem 0' }}>
-          <span style={{ color: '#f8fafc' }}>{pr.title}</span>
-          <span style={{ color: '#64748b', fontWeight: 400 }}>#{pr.number}</span>
+        <h2 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.015em', display: 'flex', alignItems: 'baseline', gap: 8, margin: '0 0 10px 0' }}>
+          <span style={{ color: 'var(--gb-fg)' }}>{pr.title}</span>
+          <span style={{ color: 'var(--gb-fg-4)', fontWeight: 400 }}>#{pr.number}</span>
         </h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <span className={`badge ${statusBadgeClass}`} style={{ 
-            padding: '0.25rem 0.75rem',
-            borderRadius: '6px',
-            fontSize: '0.8rem',
-            fontWeight: 700,
-            textTransform: 'uppercase'
-          }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Chip
+            variant={pr.status === 'merged' ? 'merged' : pr.status === 'closed' ? 'err' : 'ok'}
+            icon={pr.status === 'merged' ? <GitMerge size={11} /> : pr.status === 'closed' ? <XCircle size={11} /> : <GitPullRequest size={11} />}
+            style={{ padding: '3px 9px', height: 22, textTransform: 'capitalize' }}
+          >
             {pr.status}
-          </span>
-          <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>
-            <strong>@{pr.authorUsername}</strong> wants to merge {commits.length} commit{commits.length !== 1 ? 's' : ''} into <code style={{ background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{pr.targetBranch}</code> from <code style={{ background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>{pr.sourceBranch}</code>
+          </Chip>
+          <span style={{ fontSize: 12.5, color: 'var(--gb-fg-3)' }}>
+            <strong style={{ color: 'var(--gb-fg)' }}>{pr.authorUsername}</strong> wants to merge{' '}
+            <span style={{ fontFamily: 'var(--gb-mono)', color: 'var(--gb-fg-2)' }}>{commits.length} commit{commits.length !== 1 ? 's' : ''}</span> into{' '}
+            <span style={{ fontFamily: 'var(--gb-mono)', background: 'var(--gb-surface-2)', padding: '1px 6px', borderRadius: 3, color: 'var(--gb-fg)' }}>{pr.targetBranch}</span>
+            <span style={{ color: 'var(--gb-fg-4)' }}> ← </span>
+            <span style={{ fontFamily: 'var(--gb-mono)', background: 'var(--gb-accent-bg)', padding: '1px 6px', borderRadius: 3, color: 'var(--gb-accent)' }}>{pr.sourceBranch}</span>
           </span>
         </div>
       </div>
@@ -2695,27 +2690,24 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 
       {/* Content based on sub tabs */}
       {prTab === 'conversation' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 22, alignItems: 'start' }}>
           {/* Main timeline */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* PR Description card */}
-            <div className="glass-card" style={{ padding: '1.25rem' }}>
-              <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontWeight: 600, color: '#f8fafc' }}>@{pr.authorUsername}</span>
-                <span style={{ color: '#64748b', fontSize: '0.85rem' }}>commented on {new Date(pr.createdAt).toLocaleDateString()}</span>
+            <Card style={{ padding: 0 }}>
+              <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--gb-line)', background: 'var(--gb-surface-2)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                <Avatar name={pr.authorUsername} size={20} />
+                <strong style={{ color: 'var(--gb-fg)' }}>{pr.authorUsername}</strong>
+                <span style={{ color: 'var(--gb-fg-3)' }}>opened this on {new Date(pr.createdAt).toLocaleDateString()}</span>
               </div>
-              {pr.description ? (
-                <div
-                  className="markdown-body"
-                  style={{ color: '#e2e8f0', lineHeight: '1.5' }}
-                  dangerouslySetInnerHTML={{ __html: renderReadme(pr.description) }}
-                />
-              ) : (
-                <p style={{ color: '#e2e8f0', margin: 0, lineHeight: '1.5' }}>
-                  No description provided.
-                </p>
-              )}
-            </div>
+              <div className="markdown-body" style={{ padding: '14px 18px', color: 'var(--gb-fg-2)', fontSize: 13.5, lineHeight: 1.55 }}>
+                {pr.description ? (
+                  <ReadmeBody content={pr.description} />
+                ) : (
+                  <p style={{ margin: 0, color: 'var(--gb-fg-3)' }}>No description provided.</p>
+                )}
+              </div>
+            </Card>
 
             {/* Conversation timeline */}
             {comments.length > 0 && (
@@ -2803,9 +2795,9 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                 flexDirection: 'column',
                 gap: '1rem',
                 padding: '1.25rem',
-                background: 'rgba(30, 41, 59, 0.25)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--border-radius)',
+                background: 'var(--gb-surface)',
+                border: '1px solid var(--gb-line)',
+                borderRadius: 10,
                 marginTop: '1rem'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
@@ -2838,12 +2830,12 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                     {(pr.mergeable === undefined || pr.mergeable === null) && <span className="loader" style={{ width: '18px', height: '18px', borderWidth: '2px' }}></span>}
                   </div>
                   <div className="merge-box-content" style={{ flex: 1 }}>
-                    <h3 className="merge-box-title" style={{ color: '#f8fafc', margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+                    <h3 className="merge-box-title" style={{ color: 'var(--gb-fg)', margin: 0, fontSize: 14, fontWeight: 600 }}>
                       {pr.mergeable === true && "This branch has no conflicts"}
                       {pr.mergeable === false && "This branch has conflicts that must be resolved"}
                       {(pr.mergeable === undefined || pr.mergeable === null) && "Checking mergeability..."}
                     </h3>
-                    <div className="merge-box-desc" style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
+                    <div className="merge-box-desc" style={{ color: 'var(--gb-fg-3)', fontSize: 12 }}>
                       {pr.mergeable === true && "Merging can be performed automatically."}
                       {pr.mergeable === false && "Conflicts must be resolved before this pull request can be merged."}
                       {(pr.mergeable === undefined || pr.mergeable === null) && "We're checking if this branch can be merged cleanly."}
