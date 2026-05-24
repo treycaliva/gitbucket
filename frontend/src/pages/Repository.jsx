@@ -52,7 +52,14 @@ function globMatch(pattern, value) {
 }
 function getMatchingRule(rules, targetBranch) {
   if (!Array.isArray(rules) || !targetBranch) return null;
-  return rules.find(r => globMatch(r.pattern, targetBranch)) || null;
+  const wildcardCount = (p) => [...p].filter((c) => c === '*' || c === '?').length;
+  const sorted = [...rules].sort((a, b) => {
+    const wa = wildcardCount(a.pattern), wb = wildcardCount(b.pattern);
+    if (wa !== wb) return wa - wb;                       // fewer wildcards = more specific
+    if (a.pattern.length !== b.pattern.length) return b.pattern.length - a.pattern.length; // longer = more specific
+    return a.pattern < b.pattern ? -1 : 1;              // lexicographic tiebreak
+  });
+  return sorted.find((r) => globMatch(r.pattern, targetBranch)) || null;
 }
 function buildReviewerList(requestedReviewers, reviews) {
   const byUser = new Map();
@@ -2843,7 +2850,7 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                     <button 
                       className="btn btn-primary" 
                       onClick={handleMerge}
-                      disabled={actionLoading || pr.mergeable !== true}
+                      disabled={actionLoading || pr.mergeable !== true || !approvalsOk}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                     >
                       {actionLoading ? (
