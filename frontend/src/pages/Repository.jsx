@@ -2552,6 +2552,17 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 		}
 	};
 
+  // Task 5: Derived hook values for approvals/build callouts.
+  // Hooks must run unconditionally on every render, BEFORE any early return.
+  // Hoist the pr-derived inputs into plain consts first so the useMemo dependency
+  // arrays reference simple identifiers (the React Compiler rejects optional-chaining
+  // member expressions in dep arrays). Null-tolerant helpers keep these safe while pr is null.
+  const prTargetBranch = pr ? pr.targetBranch : undefined;
+  const prRequestedReviewers = pr ? pr.requestedReviewers : undefined;
+  const matchingRule = useMemo(() => getMatchingRule(prProtectionRules, prTargetBranch), [prProtectionRules, prTargetBranch]);
+  const approvals = useMemo(() => approvalsProgress(matchingRule, reviews), [matchingRule, reviews]);
+  const reviewerList = useMemo(() => buildReviewerList(prRequestedReviewers, reviews), [prRequestedReviewers, reviews]);
+
   if (loading) {
     return (
       <div className="loader-container">
@@ -2584,14 +2595,7 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     statusBadgeClass = 'badge-pr-closed';
   }
 
-  // Task 5: Derived values for approvals/build callouts
-  // pr is guaranteed non-null here (guarded above by `if (error || !pr) return`)
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const matchingRule = useMemo(() => getMatchingRule(prProtectionRules, pr.targetBranch), [prProtectionRules, pr.targetBranch]);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const approvals = useMemo(() => approvalsProgress(matchingRule, reviews), [matchingRule, reviews]);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const reviewerList = useMemo(() => buildReviewerList(pr.requestedReviewers, reviews), [pr.requestedReviewers, reviews]);
+  // Task 5: Non-hook derived consts (pr is guaranteed non-null past the guard above).
   const headCommit = commits[0] || null;
   const buildMeta = buildStatusMeta(headCommit?.overallStatus);
   const headBuildId = headCommit?.statuses?.[0]?.buildId || null;
