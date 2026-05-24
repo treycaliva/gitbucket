@@ -205,11 +205,10 @@ function TagsRailCard({ tags }) {
     <Card style={{ padding: 16 }}>
       <SectionHead kicker="TAGS" title="" right={<Chip variant="ok" dot>RDY</Chip>} />
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {top.map((t, i) => (
+        {top.map((t) => (
           <li key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
             <Hash size={12} style={{ color: 'var(--gb-fg-3)', flexShrink: 0 }} />
             <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
-            {i === 0 && <span style={{ marginLeft: 'auto' }}><Chip variant="ok">latest</Chip></span>}
           </li>
         ))}
       </ul>
@@ -820,10 +819,10 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
                     marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8,
                     padding: '6px 10px', borderRadius: 7, background: 'var(--gb-surface)',
                     border: '1px solid var(--gb-line)', fontFamily: 'var(--gb-mono)',
-                    fontSize: 12, color: 'var(--gb-fg-4)', cursor: 'pointer',
+                    fontSize: 12, color: 'var(--gb-fg-4)', cursor: 'pointer', maxWidth: 320,
                   }}
                 >
-                  {cloneUrl}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{cloneUrl}</span>
                   {copied ? <Check size={13} style={{ color: 'var(--gb-accent)' }} /> : <Copy size={13} />}
                 </button>
 
