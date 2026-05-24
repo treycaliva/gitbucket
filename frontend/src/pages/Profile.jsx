@@ -8,7 +8,7 @@ import Avatar from '../components/Avatar';
 
 function relativeTime(ts) {
   if (!ts) return 'recently';
-  const ms = ts.seconds ? ts.seconds * 1000 : Date.parse(ts);
+  const ms = typeof ts.seconds === 'number' ? ts.seconds * 1000 : Date.parse(ts);
   if (!ms || Number.isNaN(ms)) return 'recently';
   const diff = Date.now() - ms;
   const day = 86400000;
@@ -36,7 +36,9 @@ export default function Profile({ user, username, onNavigate }) {
         setLoading(true);
         setError('');
         const data = await apiClient.get('/api/repos');
-        const mine = (Array.isArray(data) ? data : []).filter((r) => r.owner === username);
+        const mine = (Array.isArray(data) ? data : []).filter(
+          (r) => (r.owner || '').toLowerCase() === username.toLowerCase()
+        );
         if (!cancelled) setRepos(mine);
       } catch (err) {
         if (!cancelled) setError(err.message || 'Failed to load repositories.');
