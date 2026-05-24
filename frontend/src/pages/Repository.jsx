@@ -36,7 +36,66 @@ import {
   GitCommit,
   Tag,
   ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  MessageSquareText,
 } from 'lucide-react';
+
+// --- Task 5: PR detail helpers ---
+function globMatch(pattern, value) {
+  if (!pattern) return false;
+  const re = new RegExp('^' + pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]') + '$');
+  return re.test(value);
+}
+function getMatchingRule(rules, targetBranch) {
+  if (!Array.isArray(rules) || !targetBranch) return null;
+  return rules.find(r => globMatch(r.pattern, targetBranch)) || null;
+}
+function buildReviewerList(requestedReviewers, reviews) {
+  const byUser = new Map();
+  for (const username of (requestedReviewers || [])) {
+    byUser.set(username.toLowerCase(), { username, status: 'pending', role: 'Requested · CODEOWNERS' });
+  }
+  for (const r of (reviews || [])) {
+    const key = r.username.toLowerCase();
+    byUser.set(key, { username: r.username, status: r.state, submittedAt: r.submittedAt, body: r.body, role: byUser.get(key)?.role || 'Reviewer' });
+  }
+  return [...byUser.values()];
+}
+function approvalsProgress(rule, reviews) {
+  if (!rule) return null;
+  const distinct = new Map();
+  for (const r of (reviews || [])) distinct.set(r.username.toLowerCase(), r);
+  const vals = [...distinct.values()];
+  const given = vals.filter(r => r.state === 'approved').length;
+  const changesRequested = vals.filter(r => r.state === 'changes_requested').map(r => r.username);
+  return {
+    required: rule.requireApprovals || 0,
+    given,
+    changesRequested,
+    codeownersRequired: !!rule.requireCodeownerApproval,
+    satisfied: given >= (rule.requireApprovals || 0) && changesRequested.length === 0,
+  };
+}
+function reviewMeta(status) {
+  switch (status) {
+    case 'approved':          return { variant: 'ok',  Icon: CheckCircle2,      color: 'var(--gb-ok)',   label: 'Approved' };
+    case 'changes_requested': return { variant: 'err', Icon: XCircle,           color: 'var(--gb-err)',  label: 'Changes requested' };
+    case 'commented':         return { variant: 'default', Icon: MessageSquareText, color: 'var(--gb-fg-3)', label: 'Commented' };
+    default:                  return { variant: 'warn', Icon: Clock,            color: 'var(--gb-warn)', label: 'Pending' };
+  }
+}
+function buildStatusMeta(overallStatus) {
+  const s = (overallStatus || '').toUpperCase();
+  if (s === 'SUCCESS')
+    return { variant: 'ok',  Icon: CheckCircle2,  color: 'var(--gb-ok)',   bg: 'var(--gb-ok-dim)',   chip: 'SUCCESS', title: 'Build passing on head commit' };
+  if (s === 'FAILURE' || s === 'TIMEOUT' || s === 'CANCELLED')
+    return { variant: 'err', Icon: AlertTriangle, color: 'var(--gb-err)',  bg: 'var(--gb-err-dim)',  chip: s,        title: `Build ${s.toLowerCase()} on head commit` };
+  return { variant: 'warn', Icon: Clock, color: 'var(--gb-warn)', bg: 'var(--gb-warn-dim)', chip: s || 'PENDING', title: 'Build pending — no status reported' };
+}
 
 function renderReadme(markdown) {
   if (!markdown) return '';
@@ -1513,6 +1572,154 @@ export default function Repository({ user, owner, repo, initialTab = 'code', ini
 }
 
 // ==========================================
+// Task 5: PR Detail Sub-components
+// ==========================================
+
+function ApprovalsCallout({ approvals, matchingRule, mergeAllowed, onMerge, merging }) {
+  const meta = !matchingRule
+    ? { Icon: CheckCircle2, color: 'var(--gb-ok)', bg: 'var(--gb-ok-dim)' }
+    : approvals.satisfied
+      ? { Icon: CheckCircle2, color: 'var(--gb-ok)', bg: 'var(--gb-ok-dim)' }
+      : approvals.changesRequested.length
+        ? { Icon: XCircle, color: 'var(--gb-err)', bg: 'var(--gb-err-dim)' }
+        : { Icon: Clock, color: 'var(--gb-warn)', bg: 'var(--gb-warn-dim)' };
+  const Bubble = meta.Icon;
+  const headline = !matchingRule ? 'No approvals required' : `Approvals · ${approvals.given} of ${approvals.required}`;
+  const subhead = !matchingRule
+    ? 'No protection rule applies — anyone with write access can merge.'
+    : [
+        `Rule for ${matchingRule.pattern} requires ${approvals.required} approval${approvals.required === 1 ? '' : 's'}${approvals.codeownersRequired ? ' + CODEOWNERS' : ''}`,
+        approvals.changesRequested.length ? `changes requested by ${approvals.changesRequested.map(u => '@' + u).join(', ')}` : null,
+      ].filter(Boolean).join(' · ');
+  return (
+    <Card style={{ padding: 0, marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px' }}>
+        <div style={{ width: 36, height: 36, borderRadius: '50%', background: meta.bg, color: meta.color, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Bubble size={18} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gb-fg)' }}>{headline}</div>
+          <div style={{ fontSize: 12, color: 'var(--gb-fg-3)' }}>{subhead}</div>
+        </div>
+        <button type="button" onClick={onMerge} disabled={!mergeAllowed || merging}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 6, fontSize: 13, border: '1px solid var(--gb-line)', background: 'var(--gb-surface-2)', color: 'var(--gb-fg)', cursor: mergeAllowed && !merging ? 'pointer' : 'not-allowed', opacity: mergeAllowed && !merging ? 1 : 0.6, flexShrink: 0 }}>
+          <GitMerge size={13} /> {merging ? 'Merging…' : 'Merge pull request'}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function BuildCallout({ meta, headCommit, buildId, owner, repo, onNavigate }) {
+  const short = headCommit.sha.substring(0, 7);
+  const isFail = meta.variant === 'err';
+  const Bubble = meta.Icon;
+  return (
+    <Card style={{ padding: 0, marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px' }}>
+        <div style={{ width: 36, height: 36, borderRadius: '50%', background: meta.bg, color: meta.color, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Bubble size={18} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gb-fg)' }}>{meta.title}</div>
+          <div style={{ fontSize: 12, color: 'var(--gb-fg-3)' }}>
+            <span style={{ fontFamily: 'var(--gb-mono)' }}>{short}</span> · status: {meta.chip}
+            {isFail && buildId && (
+              <>
+                {' · '}
+                <a role="button" tabIndex={0}
+                   onClick={() => onNavigate('build_logs', { owner, repo, sha: headCommit.sha, buildId })}
+                   style={{ color: 'var(--gb-err)', textDecoration: 'underline', cursor: 'pointer' }}>view build logs →</a>
+              </>
+            )}
+          </div>
+        </div>
+        <Chip variant={meta.variant}>{meta.chip}</Chip>
+      </div>
+    </Card>
+  );
+}
+
+function ReviewerRail({ reviewers }) {
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="REVIEWERS" title="" />
+      {reviewers.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--gb-fg-3)' }}>No reviewers yet.</div>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {reviewers.map(r => {
+            const m = reviewMeta(r.status);
+            const RowIcon = m.Icon;
+            return (
+              <li key={r.username} style={{ display: 'grid', gridTemplateColumns: '22px 1fr 14px', gap: 9, alignItems: 'center' }}>
+                <Avatar name={r.username} size={22} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.username}</span>
+                    <span style={{ fontSize: 10.5, color: m.color, fontWeight: 500, flexShrink: 0 }}>· {m.label}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--gb-fg-4)' }}>{r.role}</div>
+                </div>
+                <RowIcon size={13} color={m.color} strokeWidth={2.4} />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function RuleMatchedCard({ rule, targetBranch }) {
+  if (!rule) return null;
+  const lines = [
+    rule.requirePullRequest ? 'PR required' : null,
+    rule.requireApprovals > 0 ? `${rule.requireApprovals} approval${rule.requireApprovals === 1 ? '' : 's'} required` : null,
+    rule.requireCodeownerApproval ? 'CODEOWNERS review required' : null,
+    (rule.blockForcePush || rule.blockDeletion)
+      ? `No ${[rule.blockForcePush && 'force-push', rule.blockDeletion && 'delete'].filter(Boolean).join(', no ')}`
+      : null,
+  ].filter(Boolean);
+  return (
+    <Card style={{ padding: 16 }}>
+      <SectionHead kicker="RULE MATCHED" title="" />
+      <div style={{ fontSize: 12, color: 'var(--gb-fg-3)', marginBottom: 8 }}>
+        Target <span style={{ fontFamily: 'var(--gb-mono)' }}>{targetBranch}</span> matches protection rule
+        {' '}<span style={{ fontFamily: 'var(--gb-mono)' }}>{rule.pattern}</span>:
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {lines.map((l, i) => (
+          <li key={i} style={{ fontSize: 12.5, color: 'var(--gb-fg-2)' }}>
+            <span style={{ color: 'var(--gb-fg-4)', marginRight: 6 }}>·</span>{l}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function CommitsList({ commits }) {
+  return (
+    <Card style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--gb-line)', background: 'var(--gb-surface-2)' }}>
+        <SectionHead kicker="COMMITS" title="" right={<span style={{ fontSize: 11, color: 'var(--gb-fg-4)' }}>{commits.length}</span>} />
+      </div>
+      {commits.length === 0 ? (
+        <div style={{ padding: '24px', textAlign: 'center', fontSize: 12.5, color: 'var(--gb-fg-3)' }}>No commits in this pull request.</div>
+      ) : commits.map((c, i) => (
+        <div key={c.sha} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto auto', gap: 10, alignItems: 'center', padding: '10px 14px', borderTop: i === 0 ? 'none' : '1px solid var(--gb-line)' }}>
+          <Avatar name={c.authorName} size={22} />
+          <span style={{ fontSize: 13, color: 'var(--gb-fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(c.message || '').split('\n')[0]}</span>
+          <code style={{ fontFamily: 'var(--gb-mono)', fontSize: 11.5, color: 'var(--gb-accent)', background: 'var(--gb-accent-bg)', padding: '1px 6px', borderRadius: 3 }}>{c.sha.substring(0, 7)}</code>
+          <span style={{ fontSize: 11, color: 'var(--gb-fg-4)' }}>{new Date(c.date).toLocaleDateString()}</span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+// ==========================================
 // Insights Tab Components
 // ==========================================
 
@@ -2178,6 +2385,9 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
   const [reviewSubmitting, setReviewSubmitting] = useState('');
   const [reviewBody, setReviewBody] = useState('');
 
+  // Branch protection rules for PR detail
+  const [prProtectionRules, setPrProtectionRules] = useState([]);
+
   const isOwner = user && user.username && user.username.toLowerCase() === owner.toLowerCase();
   const isPrAuthor = user && user.username && pr && pr.authorUsername && user.username.toLowerCase() === pr.authorUsername.toLowerCase();
 
@@ -2210,17 +2420,19 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
       setLoading(true);
       setError('');
       try {
-        const [prData, commitsData, diffData, reviewsData] = await Promise.all([
+        const [prData, commitsData, diffData, reviewsData, rulesData] = await Promise.all([
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}`),
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/commits`).catch(() => []),
           apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/diff`).catch(() => ({ rawDiff: '' })),
-          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`).catch(() => [])
+          apiClient.get(`/api/repos/${owner}/${repo}/pulls/${prNumber}/reviews`).catch(() => []),
+          apiClient.get(`/api/repos/${owner}/${repo}/branch-protection`).catch(() => []),
         ]);
 
         setPr(prData);
         setCommits(commitsData || []);
         setDiff(diffData?.rawDiff || '');
         setReviews(Array.isArray(reviewsData) ? reviewsData : []);
+        setPrProtectionRules(Array.isArray(rulesData) ? rulesData : []);
 
         const saved = localStorage.getItem(`pr_comments_${owner}_${repo}_${prNumber}`);
         if (saved) {
@@ -2365,17 +2577,27 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     );
   }
 
-  let badgeColor = '#38bdf8'; // open
   let statusBadgeClass = 'badge-pr-open';
   if (pr.status === 'merged') {
-    badgeColor = '#a855f7';
     statusBadgeClass = 'badge-pr-merged';
   } else if (pr.status === 'closed') {
-    badgeColor = '#ef4444';
     statusBadgeClass = 'badge-pr-closed';
   }
 
-
+  // Task 5: Derived values for approvals/build callouts
+  // pr is guaranteed non-null here (guarded above by `if (error || !pr) return`)
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const matchingRule = useMemo(() => getMatchingRule(prProtectionRules, pr.targetBranch), [prProtectionRules, pr.targetBranch]);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const approvals = useMemo(() => approvalsProgress(matchingRule, reviews), [matchingRule, reviews]);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const reviewerList = useMemo(() => buildReviewerList(pr.requestedReviewers, reviews), [pr.requestedReviewers, reviews]);
+  const headCommit = commits[0] || null;
+  const buildMeta = buildStatusMeta(headCommit?.overallStatus);
+  const headBuildId = headCommit?.statuses?.[0]?.buildId || null;
+  const approvalsOk = !matchingRule || (approvals && approvals.satisfied);
+  const mergeAllowed = pr.mergeable === true && approvalsOk;
+  const isOpen = pr.status === 'open';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -2544,6 +2766,14 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                 </button>
               </div>
             </form>
+
+            {/* Task 5: Approvals + Build callouts (ADDITIVE — above the existing merge box) */}
+            {isOpen && (
+              <ApprovalsCallout approvals={approvals} matchingRule={matchingRule} mergeAllowed={mergeAllowed} onMerge={handleMerge} merging={actionLoading} />
+            )}
+            {isOpen && headCommit && (
+              <BuildCallout meta={buildMeta} headCommit={headCommit} buildId={headBuildId} owner={owner} repo={repo} onNavigate={onNavigate} />
+            )}
 
             {/* Merge box at bottom */}
             {pr.status === 'open' && (
@@ -2741,175 +2971,62 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
 
           {/* Right Column: Metadata / info */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {/* Reviewers */}
-            <div className="glass-card" style={{ padding: '1.25rem' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Reviewers</h3>
-              {(() => {
-                // Build a single ordered list:
-                //   1) requestedReviewers (in their declared order)
-                //   2) any users who have submitted a review but are NOT in #1
-                // For each, look up the latest review (if any) to render their state.
-                const requested = Array.isArray(pr.requestedReviewers) ? pr.requestedReviewers : [];
-                const byUsername = new Map();
-                for (const rv of reviews) {
-                  // ListReviews orders ascending by submittedAt, so later entries win.
-                  byUsername.set(rv.username.toLowerCase(), rv);
-                }
-                const requestedLower = new Set(requested.map(u => u.toLowerCase()));
-                const adhoc = [];
-                for (const rv of reviews) {
-                  if (!requestedLower.has(rv.username.toLowerCase())) {
-                    adhoc.push(rv.username);
-                  }
-                }
-                // De-dupe adhoc (multiple reviews per user collapse).
-                const seen = new Set();
-                const adhocUnique = adhoc.filter(u => {
-                  const k = u.toLowerCase();
-                  if (seen.has(k)) return false;
-                  seen.add(k);
-                  return true;
-                });
-                const all = [...requested, ...adhocUnique];
+            {/* Task 5: ReviewerRail replaces the old IIFE reviewer list */}
+            <ReviewerRail reviewers={reviewerList} />
 
-                if (all.length === 0) {
-                  return (
-                    <div style={{ color: '#64748b', fontSize: '0.85rem' }}>
-                      No reviewers requested.
-                    </div>
-                  );
-                }
-
-                const stateLabel = (s) => {
-                  if (s === 'approved') return { text: '✓ approved', color: '#10b981' };
-                  if (s === 'changes_requested') return { text: '✕ changes requested', color: '#f43f5e' };
-                  if (s === 'commented') return { text: 'commented', color: '#94a3b8' };
-                  return { text: '– pending', color: '#64748b' };
-                };
-
-                return (
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {all.map(username => {
-                      const rv = byUsername.get(username.toLowerCase());
-                      const s = stateLabel(rv && rv.state);
-                      return (
-                        <li
-                          key={username}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            fontSize: '0.9rem',
-                          }}
-                        >
-                          <span style={{ color: '#e2e8f0' }}>@{username}</span>
-                          <span style={{ color: s.color, fontSize: '0.85rem', fontWeight: 500 }}>{s.text}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                );
-              })()}
-
-              {/* Reviewer action buttons (visible to signed-in non-author on open PRs) */}
-              {user && pr.status === 'open' && !isPrAuthor && (
-                <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                  <textarea
-                    className="text-input"
-                    placeholder="Leave a note with your review (optional)"
-                    value={reviewBody}
-                    onChange={(e) => setReviewBody(e.target.value)}
-                    style={{ width: '100%', minHeight: '60px', marginBottom: '0.75rem', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.85rem' }}
-                  />
-                  {reviewError && (
-                    <div style={{ color: '#ef4444', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{reviewError}</div>
-                  )}
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => handleSubmitReview('approved')}
-                      disabled={!!reviewSubmitting}
-                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
-                    >
-                      {reviewSubmitting === 'approved' ? 'Approving…' : 'Approve'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => handleSubmitReview('changes_requested')}
-                      disabled={!!reviewSubmitting}
-                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
-                    >
-                      {reviewSubmitting === 'changes_requested' ? 'Submitting…' : 'Request changes'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => handleSubmitReview('commented')}
-                      disabled={!!reviewSubmitting}
-                      style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
-                    >
-                      {reviewSubmitting === 'commented' ? 'Submitting…' : 'Comment'}
-                    </button>
-                  </div>
+            {/* Review action form (preserved — visible to signed-in non-author on open PRs) */}
+            {user && pr.status === 'open' && !isPrAuthor && (
+              <Card style={{ padding: '1.25rem' }}>
+                <textarea
+                  className="text-input"
+                  placeholder="Leave a note with your review (optional)"
+                  value={reviewBody}
+                  onChange={(e) => setReviewBody(e.target.value)}
+                  style={{ width: '100%', minHeight: '60px', marginBottom: '0.75rem', resize: 'vertical', fontFamily: 'inherit', fontSize: '0.85rem' }}
+                />
+                {reviewError && (
+                  <div style={{ color: '#ef4444', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{reviewError}</div>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleSubmitReview('approved')}
+                    disabled={!!reviewSubmitting}
+                    style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                  >
+                    {reviewSubmitting === 'approved' ? 'Approving…' : 'Approve'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleSubmitReview('changes_requested')}
+                    disabled={!!reviewSubmitting}
+                    style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                  >
+                    {reviewSubmitting === 'changes_requested' ? 'Submitting…' : 'Request changes'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleSubmitReview('commented')}
+                    disabled={!!reviewSubmitting}
+                    style={{ padding: '0.35rem 0.7rem', fontSize: '0.8rem', flex: 1 }}
+                  >
+                    {reviewSubmitting === 'commented' ? 'Submitting…' : 'Comment'}
+                  </button>
                 </div>
-              )}
-            </div>
+              </Card>
+            )}
 
-            <div className="glass-card" style={{ padding: '1.25rem' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', margin: '0 0 1rem 0' }}>Review Status</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Status</span>
-                  <span style={{ color: badgeColor, fontWeight: 600, textTransform: 'uppercase' }}>{pr.status}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Branches</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: '#94a3b8' }}>
-                    {pr.sourceBranch} &rarr; {pr.targetBranch}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Created</span>
-                  <span style={{ color: '#e2e8f0' }}>{new Date(pr.createdAt).toLocaleDateString()}</span>
-                </div>
-              </div>
-            </div>
+            {/* Task 5: RuleMatchedCard replaces the old "Review Status" glass-card */}
+            <RuleMatchedCard rule={matchingRule} targetBranch={pr.targetBranch} />
           </div>
         </div>
       )}
 
       {prTab === 'commits' && (
-        <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', margin: 0 }}>Commits ({commits.length})</h3>
-          </div>
-          <div>
-            {commits.length === 0 ? (
-              <div style={{ color: '#64748b', fontStyle: 'italic', padding: '2rem', textAlign: 'center' }}>No commits found.</div>
-            ) : (
-              commits.map(c => (
-                <div key={c.sha} className="commit-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <span className="commit-message" style={{ fontSize: '0.95rem', margin: 0 }}>{c.message}</span>
-                    </div>
-                    <div className="commit-meta">
-                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>@{c.authorName}</span>
-                      <span>committed on {new Date(c.date).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <code style={{ color: '#38bdf8', fontSize: '0.85rem', fontWeight: 600, background: 'rgba(56,189,248,0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>
-                      {c.sha.substring(0, 8)}
-                    </code>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        <CommitsList commits={commits} />
       )}
 
       {prTab === 'diff' && (
