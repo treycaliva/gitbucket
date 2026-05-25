@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { authService } from '../authService';
 import { getMultiFactorResolver, TotpMultiFactorGenerator } from 'firebase/auth';
 import { Database, Lock, Mail, User } from 'lucide-react';
+import Card from '../components/Card';
 
 const USERNAME_REGEX = /^[a-zA-Z0-9-]{3,20}$/;
 
@@ -190,38 +191,61 @@ export default function Login({ onNavigate, currentNavigation }) {
     setError('');
   };
 
+  const iconStyle = {
+    position: 'absolute',
+    left: 12,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    color: 'var(--gb-fg-4)',
+    pointerEvents: 'none',
+  };
+
+  const linkButtonStyle = {
+    background: 'none',
+    border: 'none',
+    color: 'var(--gb-accent)',
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: 0,
+  };
+
   return (
     <div style={{
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: '70vh',
-      padding: '1rem'
+      padding: 16,
     }}>
-      <div className="glass-card modal-content" style={{ padding: '2.5rem' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+      <Card style={{ padding: 28, width: '100%', maxWidth: 420 }}>
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '60px',
-            height: '60px',
-            borderRadius: '16px',
-            background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%)',
-            border: '1px solid rgba(56, 189, 248, 0.3)',
-            color: '#38bdf8',
-            marginBottom: '1rem'
+            display: 'inline-grid',
+            placeItems: 'center',
+            width: 48,
+            height: 48,
+            borderRadius: 10,
+            background: 'linear-gradient(140deg, #5fc7f5 0%, #8b8cf8 100%)',
+            color: '#0a0d14',
+            marginBottom: 16,
           }}>
-            <Database size={32} />
+            <Database size={24} />
           </div>
-          <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', fontWeight: 800 }}>
+          <h1 style={{
+            fontSize: 25,
+            margin: 0,
+            marginBottom: 6,
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            color: 'var(--gb-fg)',
+          }}>
             {mfaChallenging
               ? 'Verify your identity'
               : pickingUsername
                 ? 'Choose a username'
-                : isSignUp ? 'Create Account' : 'Welcome to GitBucket'}
+                : isSignUp ? 'Create account' : 'Welcome to GitBucket'}
           </h1>
-          <p style={{ color: '#94a3b8', fontSize: '0.95rem' }}>
+          <p style={{ color: 'var(--gb-fg-3)', fontSize: 13.5, margin: 0, lineHeight: 1.5 }}>
             {mfaChallenging
               ? 'Two-factor authentication is required for this account.'
               : pickingUsername
@@ -234,14 +258,14 @@ export default function Login({ onNavigate, currentNavigation }) {
 
         {error && (
           <div style={{
-            background: 'rgba(244, 63, 94, 0.12)',
-            border: '1px solid rgba(244, 63, 94, 0.25)',
-            color: '#fb7185',
-            padding: '0.85rem 1rem',
-            borderRadius: '8px',
-            fontSize: '0.875rem',
-            marginBottom: '1.5rem',
-            lineHeight: 1.4
+            background: 'var(--gb-err-dim)',
+            border: '1px solid rgba(248,113,113,0.25)',
+            color: 'var(--gb-err)',
+            padding: '12px 14px',
+            borderRadius: 8,
+            fontSize: 13,
+            marginBottom: 22,
+            lineHeight: 1.4,
           }}>
             {error}
           </div>
@@ -257,20 +281,20 @@ export default function Login({ onNavigate, currentNavigation }) {
                   disabled={loading}
                   style={{
                     width: '100%',
-                    padding: '0.75rem',
+                    padding: '10px 12px',
                     background: '#ffffff',
                     color: '#1f2937',
                     border: '1px solid #dadce0',
-                    borderRadius: '8px',
+                    borderRadius: 8,
                     fontWeight: 600,
-                    fontSize: '0.95rem',
+                    fontSize: 14,
                     cursor: loading ? 'not-allowed' : 'pointer',
                     opacity: loading ? 0.6 : 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '0.6rem',
-                    marginBottom: '1.25rem'
+                    gap: 9,
+                    marginBottom: 18,
                   }}
                 >
                   <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -285,14 +309,14 @@ export default function Login({ onNavigate, currentNavigation }) {
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.75rem',
-                  marginBottom: '1.25rem',
-                  color: '#64748b',
-                  fontSize: '0.8rem'
+                  gap: 12,
+                  marginBottom: 18,
+                  color: 'var(--gb-fg-4)',
+                  fontSize: 12,
                 }}>
-                  <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.08)' }} />
+                  <div style={{ flex: 1, height: 1, background: 'var(--gb-line)' }} />
                   <span>or</span>
-                  <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.08)' }} />
+                  <div style={{ flex: 1, height: 1, background: 'var(--gb-line)' }} />
                 </div>
               </>
             )}
@@ -302,17 +326,11 @@ export default function Login({ onNavigate, currentNavigation }) {
                 <div className="form-group">
                   <label className="form-label">Username</label>
                   <div style={{ position: 'relative' }}>
-                    <User size={18} style={{
-                      position: 'absolute',
-                      left: '1rem',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: '#64748b'
-                    }} />
+                    <User size={18} style={iconStyle} />
                     <input
                       type="text"
                       className="text-input"
-                      style={{ paddingLeft: '2.75rem' }}
+                      style={{ paddingLeft: 38 }}
                       placeholder="e.g. trey-caliva"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
@@ -320,26 +338,20 @@ export default function Login({ onNavigate, currentNavigation }) {
                       required
                     />
                   </div>
-                  <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--gb-fg-4)', marginTop: 4, display: 'block' }}>
                     Lowercase letters, numbers, and hyphens only (3-20 chars).
                   </span>
                 </div>
               )}
 
               <div className="form-group">
-                <label className="form-label">Email Address</label>
+                <label className="form-label">Email address</label>
                 <div style={{ position: 'relative' }}>
-                  <Mail size={18} style={{
-                    position: 'absolute',
-                    left: '1rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: '#64748b'
-                  }} />
+                  <Mail size={18} style={iconStyle} />
                   <input
                     type="email"
                     className="text-input"
-                    style={{ paddingLeft: '2.75rem' }}
+                    style={{ paddingLeft: 38 }}
                     placeholder="you@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -349,20 +361,14 @@ export default function Login({ onNavigate, currentNavigation }) {
                 </div>
               </div>
 
-              <div className="form-group" style={{ marginBottom: '2rem' }}>
+              <div className="form-group" style={{ marginBottom: 24 }}>
                 <label className="form-label">Password</label>
                 <div style={{ position: 'relative' }}>
-                  <Lock size={18} style={{
-                    position: 'absolute',
-                    left: '1rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: '#64748b'
-                  }} />
+                  <Lock size={18} style={iconStyle} />
                   <input
                     type="password"
                     className="text-input"
-                    style={{ paddingLeft: '2.75rem' }}
+                    style={{ paddingLeft: 38 }}
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -375,41 +381,34 @@ export default function Login({ onNavigate, currentNavigation }) {
               <button
                 type="submit"
                 className="btn btn-primary"
-                style={{ width: '100%', padding: '0.85rem' }}
+                style={{ width: '100%' }}
                 disabled={loading}
               >
                 {loading ? (
                   <span className="loader" style={{ width: '16px', height: '16px', borderWidth: '2px' }}></span>
                 ) : (
-                  isSignUp ? 'Sign Up' : 'Sign In'
+                  isSignUp ? 'Sign up' : 'Sign in'
                 )}
               </button>
             </form>
 
             <div style={{
               textAlign: 'center',
-              marginTop: '1.5rem',
-              fontSize: '0.9rem',
-              color: '#94a3b8'
+              marginTop: 22,
+              fontSize: 13,
+              color: 'var(--gb-fg-3)',
             }}>
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
               <button
                 className="btn-link"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#38bdf8',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: 0
-                }}
+                style={linkButtonStyle}
                 onClick={() => {
                   setIsSignUp(!isSignUp);
                   setError('');
                 }}
                 disabled={loading}
               >
-                {isSignUp ? 'Sign In' : 'Sign Up'}
+                {isSignUp ? 'Sign in' : 'Sign up'}
               </button>
             </div>
           </>
@@ -420,17 +419,11 @@ export default function Login({ onNavigate, currentNavigation }) {
             <div className="form-group">
               <label className="form-label">Username</label>
               <div style={{ position: 'relative' }}>
-                <User size={18} style={{
-                  position: 'absolute',
-                  left: '1rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: '#64748b'
-                }} />
+                <User size={18} style={iconStyle} />
                 <input
                   type="text"
                   className="text-input"
-                  style={{ paddingLeft: '2.75rem' }}
+                  style={{ paddingLeft: 38 }}
                   placeholder="e.g. trey-caliva"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
@@ -439,7 +432,7 @@ export default function Login({ onNavigate, currentNavigation }) {
                   required
                 />
               </div>
-              <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--gb-fg-4)', marginTop: 4, display: 'block' }}>
                 Lowercase letters, numbers, and hyphens only (3-20 chars).
               </span>
             </div>
@@ -447,7 +440,7 @@ export default function Login({ onNavigate, currentNavigation }) {
             <button
               type="submit"
               className="btn btn-primary"
-              style={{ width: '100%', padding: '0.85rem' }}
+              style={{ width: '100%' }}
               disabled={loading}
             >
               {loading ? (
@@ -459,21 +452,14 @@ export default function Login({ onNavigate, currentNavigation }) {
 
             <div style={{
               textAlign: 'center',
-              marginTop: '1.5rem',
-              fontSize: '0.9rem',
-              color: '#94a3b8'
+              marginTop: 22,
+              fontSize: 13,
+              color: 'var(--gb-fg-3)',
             }}>
               <button
                 type="button"
                 className="btn-link"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#38bdf8',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  padding: 0
-                }}
+                style={linkButtonStyle}
                 onClick={handleCancelPickUsername}
                 disabled={loading}
               >
@@ -485,11 +471,11 @@ export default function Login({ onNavigate, currentNavigation }) {
 
         {mfaChallenging && (
           <form onSubmit={handleMfaSubmit}>
-            <p style={{ color: '#94a3b8', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+            <p style={{ color: 'var(--gb-fg-3)', marginTop: 0, marginBottom: 18, fontSize: 13, lineHeight: 1.5 }}>
               Enter the 6-digit code from your authenticator app to finish signing in.
             </p>
 
-            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+            <div className="form-group" style={{ marginBottom: 22 }}>
               <label className="form-label">Authenticator code</label>
               <input
                 type="text"
@@ -507,7 +493,7 @@ export default function Login({ onNavigate, currentNavigation }) {
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '0.85rem' }} disabled={loading}>
+            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
               {loading ? (
                 <span className="loader" style={{ width: '16px', height: '16px', borderWidth: '2px' }}></span>
               ) : (
@@ -515,11 +501,11 @@ export default function Login({ onNavigate, currentNavigation }) {
               )}
             </button>
 
-            <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.9rem', color: '#94a3b8' }}>
+            <div style={{ textAlign: 'center', marginTop: 22, fontSize: 13, color: 'var(--gb-fg-3)' }}>
               <button
                 type="button"
                 className="btn-link"
-                style={{ background: 'none', border: 'none', color: '#38bdf8', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                style={linkButtonStyle}
                 onClick={handleCancelMfa}
                 disabled={loading}
               >
@@ -528,7 +514,7 @@ export default function Login({ onNavigate, currentNavigation }) {
             </div>
           </form>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

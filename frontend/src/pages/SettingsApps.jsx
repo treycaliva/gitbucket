@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiClient } from '../apiClient';
+import { Boxes, Package, PackageCheck } from 'lucide-react';
+import Card from '../components/Card';
 
 export default function SettingsApps({ onNavigate }) {
   const [owned, setOwned] = useState([]);
@@ -11,37 +13,86 @@ export default function SettingsApps({ onNavigate }) {
   }, []);
 
   return (
-    <div style={{ maxWidth: '720px', margin: '2rem auto', padding: '2rem', color: '#e2e8f0' }}>
-      <h2>GitHub Apps</h2>
+    <div>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.015em', color: 'var(--gb-fg)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
+          <Boxes size={18} style={{ color: 'var(--gb-accent)' }} /> GitHub Apps
+        </h1>
+        <p style={{ fontSize: 13, color: 'var(--gb-fg-3)', marginTop: 6, maxWidth: 760, lineHeight: 1.5 }}>
+          Manage the GitHub Apps you own and the installations enabled on your account.
+        </p>
+      </div>
 
-      <section>
-        <h3>Owned by me</h3>
-        {owned.length === 0 ? (
-          <p style={{ color: '#94a3b8' }}>No Apps yet.</p>
-        ) : (
-          <ul>
-            {owned.map(a => (
-              <li key={a.id}>
-                <a href={`/settings/apps/${a.slug}/installations/new`}>{a.name}</a>
-                <span style={{ color: '#94a3b8' }}> ({a.slug})</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <Card style={{ padding: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--gb-fg)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Package size={16} style={{ color: 'var(--gb-accent)' }} />
+            Owned by me ({owned.length})
+          </h3>
+          {owned.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--gb-fg-4)', fontSize: 13 }}>
+              No Apps yet.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {owned.map(a => (
+                <div
+                  key={a.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: 14,
+                    background: 'var(--gb-surface-2)',
+                    border: '1px solid var(--gb-line)',
+                    borderRadius: 8,
+                  }}
+                >
+                  <a
+                    href={`/settings/apps/${a.slug}/installations/new`}
+                    style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--gb-accent)', textDecoration: 'none' }}
+                  >
+                    {a.name}
+                  </a>
+                  <span style={{ fontFamily: 'var(--gb-mono)', fontSize: 11.5, color: 'var(--gb-fg-4)' }}>
+                    {a.slug}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
 
-      <section style={{ marginTop: '2rem' }}>
-        <h3>Installed on my account</h3>
-        {installed.length === 0 ? (
-          <p style={{ color: '#94a3b8' }}>No installations yet.</p>
-        ) : (
-          <ul>
-            {installed.map(i => (
-              <li key={i.id}>{i.app_name || i.app_id}</li>
-            ))}
-          </ul>
-        )}
-      </section>
+        <Card style={{ padding: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--gb-fg)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <PackageCheck size={16} style={{ color: 'var(--gb-accent)' }} />
+            Installed on my account ({installed.length})
+          </h3>
+          {installed.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--gb-fg-4)', fontSize: 13 }}>
+              No installations yet.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {installed.map(i => (
+                <div
+                  key={i.id}
+                  style={{
+                    padding: 14,
+                    background: 'var(--gb-surface-2)',
+                    border: '1px solid var(--gb-line)',
+                    borderRadius: 8,
+                    fontSize: 13.5,
+                    color: 'var(--gb-fg)',
+                  }}
+                >
+                  {i.app_name || i.app_id}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
