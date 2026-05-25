@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '../apiClient';
-import { ArrowLeft, Clock, FileText } from 'lucide-react';
+import { ArrowLeft, FileText } from 'lucide-react';
+import Card from '../components/Card';
 
 export default function CommitDetail({ owner, repo, sha, onNavigate }) {
   const [diff, setDiff] = useState('');
@@ -37,7 +38,7 @@ export default function CommitDetail({ owner, repo, sha, onNavigate }) {
     } else if (line.startsWith('diff --git') || line.startsWith('index ')) {
       className += ' diff-line-meta';
     }
-    
+
     return (
       <div key={idx} className={className}>
         {line}
@@ -55,62 +56,75 @@ export default function CommitDetail({ owner, repo, sha, onNavigate }) {
 
   return (
     <div>
-      <button 
-        onClick={() => onNavigate('repository', { owner, repo, tab: 'commits' })} 
-        style={{ 
-          background: 'none', 
-          border: 'none', 
-          color: '#94a3b8', 
-          display: 'flex', 
-          alignItems: 'center', 
+      <button
+        onClick={() => onNavigate('repository', { owner, repo, tab: 'commits' })}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: 'var(--gb-fg-2)',
+          display: 'flex',
+          alignItems: 'center',
           gap: '0.25rem',
           cursor: 'pointer',
-          fontSize: '0.9rem',
+          fontSize: 13,
           fontWeight: 500,
-          marginBottom: '1.25rem'
+          marginBottom: '1.25rem',
+          padding: 0,
         }}
       >
         <ArrowLeft size={14} /> Back to commits
       </button>
 
-      <div className="page-header">
-        <div className="page-header-title">
-          <h1>
-            Commit <span style={{ color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>{sha.substring(0, 7)}</span>
-          </h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', color: '#94a3b8', marginTop: '0.5rem' }}>
-            <Clock size={16} />
-            <span>Full SHA: </span>
-            <span style={{ fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.3rem', borderRadius: '4px', color: '#e2e8f0' }}>
-              {sha}
-            </span>
-          </div>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.015em', color: 'var(--gb-fg)', margin: 0 }}>
+          Commit{' '}
+          <span style={{ color: 'var(--gb-accent)', fontFamily: 'var(--gb-mono)' }}>{sha.substring(0, 7)}</span>
+        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: 13, color: 'var(--gb-fg-3)', marginTop: 6 }}>
+          <span>Full SHA:</span>
+          <span style={{
+            fontFamily: 'var(--gb-mono)',
+            background: 'var(--gb-accent-bg)',
+            padding: '0.1rem 0.4rem',
+            borderRadius: 6,
+            color: 'var(--gb-accent)',
+          }}>
+            {sha}
+          </span>
         </div>
       </div>
 
       {error ? (
-        <div className="glass-card" style={{ color: '#fb7185', borderColor: 'var(--error)' }}>
+        <div style={{
+          background: 'var(--gb-err-dim)',
+          border: '1px solid rgba(248,113,113,0.25)',
+          color: 'var(--gb-err)',
+          padding: '12px 14px',
+          borderRadius: 8,
+          fontSize: 13,
+        }}>
           {error}
         </div>
       ) : (
-        <div className="diff-container">
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{
-            background: 'rgba(255, 255, 255, 0.02)',
-            borderBottom: '1px solid var(--border-color)',
+            background: 'var(--gb-surface-2)',
+            borderBottom: '1px solid var(--gb-line)',
             padding: '0.75rem 1.25rem',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
-            color: '#94a3b8',
-            fontWeight: 500
+            color: 'var(--gb-fg-3)',
+            fontSize: 13,
+            fontWeight: 600,
           }}>
-            <FileText size={16} />
+            <FileText size={16} style={{ color: 'var(--gb-accent)' }} />
             <span>Changeset details</span>
           </div>
           <div style={{ padding: '0.5rem 0' }}>
             {diff.split('\n').map((line, idx) => renderDiffLine(line, idx))}
           </div>
-        </div>
+        </Card>
       )}
     </div>
   );

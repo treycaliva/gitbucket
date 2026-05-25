@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '../apiClient';
 import { Key, Plus, Trash2, ShieldAlert, Check, Copy } from 'lucide-react';
+import Card from '../components/Card';
 
 export default function Tokens() {
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
+
   // New Token State
   const [tokenName, setTokenName] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -35,7 +36,7 @@ export default function Tokens() {
   const handleCreateToken = async (e) => {
     e.preventDefault();
     if (!tokenName.trim()) return;
-    
+
     setGenerating(true);
     setError('');
     setNewlyCreatedToken(null);
@@ -56,7 +57,7 @@ export default function Tokens() {
     if (!window.confirm('Are you sure you want to revoke this Personal Access Token? Any git client using this token will lose access immediately.')) {
       return;
     }
-    
+
     try {
       await apiClient.delete(`/api/tokens/${tokenId}`);
       await loadTokens();
@@ -74,21 +75,24 @@ export default function Tokens() {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="page-header-title">
-          <h1 className="gradient-text">Personal Access Tokens</h1>
-          <p>Generate secure tokens to authenticate git CLI clone, push and pull operations over HTTPS</p>
-        </div>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.015em', color: 'var(--gb-fg)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
+          <Key size={18} style={{ color: 'var(--gb-accent)' }} /> Personal access tokens
+        </h1>
+        <p style={{ fontSize: 13, color: 'var(--gb-fg-3)', marginTop: 6, maxWidth: 760, lineHeight: 1.5 }}>
+          Generate secure tokens to authenticate git CLI clone, push and pull operations over HTTPS.
+        </p>
       </div>
 
       {error && (
         <div style={{
-          background: 'rgba(244, 63, 94, 0.1)',
-          border: '1px solid rgba(244, 63, 94, 0.2)',
-          color: '#fb7185',
-          padding: '1rem',
-          borderRadius: '8px',
-          marginBottom: '2rem'
+          background: 'var(--gb-err-dim)',
+          border: '1px solid rgba(248,113,113,0.25)',
+          color: 'var(--gb-err)',
+          padding: '12px 14px',
+          borderRadius: 8,
+          marginBottom: 22,
+          fontSize: 13,
         }}>
           {error}
         </div>
@@ -96,68 +100,69 @@ export default function Tokens() {
 
       {/* Newly Created Token Presentation */}
       {newlyCreatedToken && (
-        <div className="glass-card" style={{ 
-          borderColor: '#10b981', 
-          background: 'rgba(16, 185, 129, 0.08)',
-          marginBottom: '2rem',
+        <Card style={{
+          borderColor: 'rgba(74,222,128,0.25)',
+          background: 'var(--gb-ok-dim)',
+          marginBottom: 22,
+          padding: 16,
           display: 'flex',
           flexDirection: 'column',
-          gap: '1rem'
+          gap: 12,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#10b981', fontWeight: 700 }}>
-            <ShieldAlert size={20} />
-            <span>Token Generated Successfully!</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--gb-ok)', fontWeight: 600, fontSize: 14 }}>
+            <ShieldAlert size={18} />
+            <span>Token generated successfully</span>
           </div>
-          
-          <p style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: '1.4' }}>
-            Make sure to copy your Personal Access Token now. You will <strong>not</strong> be able to see it again once you refresh or navigate away!
+
+          <p style={{ color: 'var(--gb-fg-3)', fontSize: 12.5, lineHeight: 1.5, margin: 0 }}>
+            Make sure to copy your Personal Access Token now. You will <strong style={{ color: 'var(--gb-fg-2)' }}>not</strong> be able to see it again once you refresh or navigate away.
           </p>
 
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '1rem',
-            background: 'rgba(0,0,0,0.3)',
-            padding: '0.75rem 1.25rem',
-            borderRadius: '6px',
-            border: '1px solid rgba(16, 185, 129, 0.2)'
+            gap: 12,
+            background: 'var(--gb-page)',
+            padding: '10px 14px',
+            borderRadius: 6,
+            border: '1px solid rgba(74,222,128,0.2)',
           }}>
-            <span style={{ 
-              fontFamily: 'var(--font-mono)', 
-              color: '#f8fafc',
-              fontSize: '1rem',
+            <span style={{
+              fontFamily: 'var(--gb-mono)',
+              color: 'var(--gb-fg)',
+              fontSize: 13.5,
               flex: 1,
-              wordBreak: 'break-all'
+              wordBreak: 'break-all',
             }}>
               {newlyCreatedToken}
             </span>
-            <button 
-              className="btn btn-secondary btn-icon" 
+            <button
+              className="btn btn-secondary btn-icon"
               onClick={copyToken}
-              style={{ borderColor: copied ? '#10b981' : 'var(--border-color)', color: copied ? '#10b981' : '#38bdf8' }}
+              style={{ borderColor: copied ? 'var(--gb-ok)' : 'var(--gb-line)', color: copied ? 'var(--gb-ok)' : 'var(--gb-accent)' }}
             >
               {copied ? <Check size={18} /> : <Copy size={18} />}
             </button>
           </div>
-        </div>
+        </Card>
       )}
 
       <div style={{
         display: 'grid',
         gridTemplateColumns: '1fr 2fr',
-        gap: '2rem',
+        gap: 22,
         alignItems: 'start',
-        flexWrap: 'wrap'
+        flexWrap: 'wrap',
       }}>
         {/* Create Token Box */}
-        <div className="glass-card">
-          <h3 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Plus size={18} style={{ color: '#38bdf8' }} />
-            Generate New Token
+        <Card style={{ padding: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--gb-fg)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Plus size={16} style={{ color: 'var(--gb-accent)' }} />
+            Generate new token
           </h3>
           <form onSubmit={handleCreateToken}>
-            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-              <label className="form-label">Token Description</label>
+            <div className="form-group" style={{ marginBottom: 18 }}>
+              <label className="form-label">Token description</label>
               <input
                 type="text"
                 className="text-input"
@@ -172,17 +177,17 @@ export default function Tokens() {
               {generating ? (
                 <span className="loader" style={{ width: '16px', height: '16px', borderWidth: '2px' }}></span>
               ) : (
-                'Generate Token'
+                'Generate token'
               )}
             </button>
           </form>
-        </div>
+        </Card>
 
         {/* Tokens List Box */}
-        <div className="glass-card">
-          <h3 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Key size={18} style={{ color: '#38bdf8' }} />
-            Active Tokens ({tokens.length})
+        <Card style={{ padding: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--gb-fg)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Key size={16} style={{ color: 'var(--gb-accent)' }} />
+            Active tokens ({tokens.length})
           </h3>
 
           {loading ? (
@@ -190,35 +195,35 @@ export default function Tokens() {
               <div className="loader"></div>
             </div>
           ) : tokens.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b', fontSize: '0.95rem' }}>
+            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--gb-fg-4)', fontSize: 13 }}>
               You don't have any Personal Access Tokens yet. Generate one to use the Git CLI client.
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {tokens.map(token => (
-                <div 
+                <div
                   key={token.id}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '1rem',
-                    background: 'rgba(15, 23, 42, 0.4)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px'
+                    padding: 14,
+                    background: 'var(--gb-surface-2)',
+                    border: '1px solid var(--gb-line)',
+                    borderRadius: 8,
                   }}
                 >
                   <div>
-                    <h4 style={{ fontWeight: 600, fontSize: '0.95rem', color: '#f8fafc', marginBottom: '0.25rem' }}>
+                    <h4 style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--gb-fg)', marginBottom: 4 }}>
                       {token.name}
                     </h4>
-                    <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: '#64748b' }}>
+                    <div style={{ display: 'flex', gap: 14, fontSize: 11.5, color: 'var(--gb-fg-4)' }}>
                       <span>Created: {token.createdAt ? new Date(token.createdAt).toLocaleDateString() : 'N/A'}</span>
                       <span>Last used: {token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleDateString() : 'Never'}</span>
                     </div>
                   </div>
-                  <button 
-                    className="btn btn-danger btn-icon" 
+                  <button
+                    className="btn btn-danger btn-icon"
                     onClick={() => handleRevokeToken(token.id)}
                     title="Revoke Token"
                   >
@@ -228,7 +233,7 @@ export default function Tokens() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );
