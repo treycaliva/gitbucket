@@ -1599,7 +1599,6 @@ input[type="checkbox"] {
 /* --- Flat repository header (Code tab) --- */
 .gb-repo-header {
   padding: 22px 28px 0;
-  border-bottom: 1px solid var(--gb-line);
   background: transparent;
 }
 .gb-repo-header .title {
