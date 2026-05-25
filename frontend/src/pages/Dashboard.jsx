@@ -3,6 +3,7 @@ import { apiClient } from '../apiClient';
 import { Plus, Globe, Lock, Search, History, GitPullRequest, Pin, Folder } from 'lucide-react';
 import Card from '../components/Card';
 import SectionHead from '../components/SectionHead';
+import Select from '../components/Select';
 
 // ── Module-scope helpers ──────────────────────────────────────────────────────
 
@@ -307,23 +308,33 @@ export default function Dashboard({ user, onNavigate }) {
 
               {/* Step 12: All repositories section */}
               <SectionHead kicker="ALL" title="All repositories" right={<span style={{ color: 'var(--gb-fg-3)', fontSize: 12 }}><span style={{ fontFamily: 'var(--gb-mono)' }}>{repos.length}</span> total</span>} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <div style={{ flex: 1, display: 'inline-flex', alignItems: 'center', gap: 8, height: 32, padding: '0 11px', borderRadius: 7, background: 'var(--gb-surface)', border: '1px solid var(--gb-line)' }}>
-                  <Search size={13} color="var(--gb-fg-3)" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <div style={{ flex: 1, display: 'inline-flex', alignItems: 'center', gap: 8, height: 38, padding: '0 14px', borderRadius: 8, background: 'var(--gb-surface)', border: '1px solid var(--gb-line)' }}>
+                  <Search size={14} color="var(--gb-fg-3)" />
                   <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filter repositories…"
-                         style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', color: 'var(--gb-fg-2)', fontSize: 12.5, fontFamily: 'inherit' }} />
+                         style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', color: 'var(--gb-fg-2)', fontSize: 13, fontFamily: 'inherit' }} />
                 </div>
-                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="btn" style={{ fontFamily: 'inherit', color: 'var(--gb-fg-2)' }}>
-                  <option value="all">Type: all</option>
-                  <option value="public">Public</option>
-                  <option value="private">Private</option>
-                </select>
-                <select value={sort} onChange={(e) => setSort(e.target.value)} className="btn" style={{ fontFamily: 'inherit', color: 'var(--gb-fg-2)' }}>
-                  <option value="updated">Sort: recently updated</option>
-                  <option value="name-asc">Sort: name (A→Z)</option>
-                  <option value="name-desc">Sort: name (Z→A)</option>
-                  <option value="open-prs">Sort: most open PRs</option>
-                </select>
+                <Select
+                  label="Type:"
+                  value={typeFilter}
+                  onChange={setTypeFilter}
+                  options={[
+                    { value: 'all', label: 'all' },
+                    { value: 'public', label: 'Public' },
+                    { value: 'private', label: 'Private' },
+                  ]}
+                />
+                <Select
+                  label="Sort:"
+                  value={sort}
+                  onChange={setSort}
+                  options={[
+                    { value: 'updated', label: 'recently updated' },
+                    { value: 'name-asc', label: 'name (A→Z)' },
+                    { value: 'name-desc', label: 'name (Z→A)' },
+                    { value: 'open-prs', label: 'most open PRs' },
+                  ]}
+                />
               </div>
               <Card style={{ padding: 0 }}>
                 {filtered.length === 0 ? (
@@ -338,16 +349,18 @@ export default function Dashboard({ user, onNavigate }) {
                          onClick={() => onNavigate('repository', { owner: r.owner, repo: r.name })}
                          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--gb-hover)')}
                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                         style={{ display: 'grid', gridTemplateColumns: '20px 1fr 100px 130px', gap: 14, alignItems: 'center', padding: '12px 16px', cursor: 'pointer', borderTop: i === 0 ? 'none' : '1px solid var(--gb-line)' }}>
+                         style={{ display: 'grid', gridTemplateColumns: '20px 1fr auto auto', columnGap: 16, alignItems: 'center', padding: '14px 18px', cursor: 'pointer', borderTop: i === 0 ? 'none' : '1px solid var(--gb-line)' }}>
                       {r.visibility === 'private' ? <Lock size={14} color="var(--gb-fg-3)" /> : <Globe size={14} color="var(--gb-fg-3)" />}
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gb-accent)' }}>{r.name}</div>
-                        {r.description && <div style={{ fontSize: 11.5, color: 'var(--gb-fg-3)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.description}</div>}
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gb-accent)' }}>{r.name}</div>
+                        {r.description && <div style={{ fontSize: 12, color: 'var(--gb-fg-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.description}</div>}
                       </div>
-                      <span style={{ fontSize: 11.5, color: hasPRs ? 'var(--gb-fg-2)' : 'var(--gb-fg-4)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <GitPullRequest size={11} /> <span style={{ fontFamily: 'var(--gb-mono)' }}>{count}</span> open
+                      <span style={{ fontSize: 12, color: hasPRs ? 'var(--gb-fg-2)' : 'var(--gb-fg-4)', display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 90, justifyContent: 'flex-end' }}>
+                        <GitPullRequest size={12} /> <span style={{ fontFamily: 'var(--gb-mono)' }}>{count}</span> open
                       </span>
-                      <span style={{ fontSize: 11.5, color: 'var(--gb-fg-3)', textAlign: 'right' }}>{relTime(r)}</span>
+                      <span style={{ fontSize: 12, color: 'var(--gb-fg-3)', minWidth: 140, textAlign: 'right' }}>
+                        Updated <span style={{ color: 'var(--gb-fg-2)' }}>{relTime(r)}</span>
+                      </span>
                     </div>
                   );
                 })}
