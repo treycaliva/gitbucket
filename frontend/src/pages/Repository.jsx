@@ -2269,29 +2269,24 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     if (!filterText) return fileTree;
     const filterLower = filterText.toLowerCase();
 
-    const checkMatch = (node) => {
-      if (!node.isDirectory) {
-        return node.name.toLowerCase().includes(filterLower) || node.path.toLowerCase().includes(filterLower);
-      }
-      const matchedChildren = node.children.filter(checkMatch);
-      return matchedChildren.length > 0;
-    };
-
-    const copyAndFilter = (nodeList) => {
-      return nodeList
-        .filter(checkMatch)
-        .map(node => {
-          if (node.isDirectory) {
-            return {
-              ...node,
-              children: copyAndFilter(node.children)
-            };
+    const filterNode = (nodeList) => {
+      const result = [];
+      for (const node of nodeList) {
+        if (!node.isDirectory) {
+          if (node.name.toLowerCase().includes(filterLower) || node.path.toLowerCase().includes(filterLower)) {
+            result.push(node);
           }
-          return node;
-        });
+        } else {
+          const filteredChildren = filterNode(node.children);
+          if (filteredChildren.length > 0) {
+            result.push({ ...node, children: filteredChildren });
+          }
+        }
+      }
+      return result;
     };
 
-    return copyAndFilter(fileTree);
+    return filterNode(fileTree);
   }, [fileTree, filterText]);
 
   const filteredFiles = useMemo(() => {
