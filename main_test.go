@@ -29,16 +29,16 @@ func TestGetClientIP(t *testing.T) {
 			want:       "198.51.100.7",
 		},
 		{
-			name:       "multi-hop XFF returns leftmost (original client) entry",
+			name:       "multi-hop XFF returns rightmost (Cloud Run GFE) entry",
 			xff:        "198.51.100.7, 203.0.113.9, 10.0.0.1",
 			remoteAddr: "127.0.0.1:443",
-			want:       "198.51.100.7",
+			want:       "10.0.0.1",
 		},
 		{
 			name:       "XFF entries are trimmed",
-			xff:        "   198.51.100.7  , 203.0.113.9",
+			xff:        "   198.51.100.7  , 203.0.113.9   ",
 			remoteAddr: "127.0.0.1:443",
-			want:       "198.51.100.7",
+			want:       "203.0.113.9",
 		},
 		{
 			name:       "IPv6 RemoteAddr without XFF",
