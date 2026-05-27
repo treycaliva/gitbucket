@@ -20,6 +20,13 @@
         }
       },
       {
+        "source": "/r/**",
+        "run": {
+          "serviceId": "gitbucket",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

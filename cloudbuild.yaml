@@ -1,0 +1,67 @@
+# Build/deploy pipeline for gitbucket, run by gitbucket's own Cloud Build engine
+# (internal/api/builds.go). The engine prepends an OIDC clone of the pushed branch
+# into /workspace, then runs the steps below in order.
+#
+# IMPORTANT: the engine honors ONLY the `steps:` array and, per step, only the
+# fields name/entrypoint/args/env/dir/id/waitFor. Do NOT add top-level images:,
+# options:, substitutions:, or timeout: — they are silently ignored.
+#
+# Substitutions injected by the engine: _COMMIT_SHA, _BRANCH_NAME, _REPO_OWNER,
+# _REPO_NAME, _GITBUCKET_URL.
+steps:
+  # --- CI (runs on every branch) ---
+  - id: backend-compile
+    name: golang:1.25
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /dev/null main.go
+
+  - id: frontend-build
+    name: node:20
+    entrypoint: bash
+    dir: frontend
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        npm ci
+        npm run build
+
+  # --- Deploy (main only; each step no-ops on other branches) ---
+  - id: image
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_BRANCH_NAME}" != "main" ]; then echo "skip: not main"; exit 0; fi
+        set -euo pipefail
+        docker build -t "us-central1-docker.pkg.dev/git-bucket-79382/gitbucket/gitbucket:${_COMMIT_SHA}" .
+        docker push "us-central1-docker.pkg.dev/git-bucket-79382/gitbucket/gitbucket:${_COMMIT_SHA}"
+
+  - id: backend-deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_BRANCH_NAME}" != "main" ]; then echo "skip: not main"; exit 0; fi
+        set -euo pipefail
+        gcloud run deploy gitbucket \
+          --image "us-central1-docker.pkg.dev/git-bucket-79382/gitbucket/gitbucket:${_COMMIT_SHA}" \
+          --region us-central1 \
+          --project git-bucket-79382 \
+          --quiet
+
+  - id: frontend-deploy
+    name: node:20
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_BRANCH_NAME}" != "main" ]; then echo "skip: not main"; exit 0; fi
+        set -euo pipefail
+        npx -y firebase-tools deploy --only hosting --project git-bucket-79382

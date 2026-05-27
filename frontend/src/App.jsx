@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { authService } from './authService';
 import {
-  Database,
+  Activity,
+  Folder,
   Key,
-  Layers,
-  LogOut,
-  Shield
+  LogOut
 } from 'lucide-react';
+import Avatar from './components/Avatar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Repository from './pages/Repository';
@@ -350,56 +350,42 @@ export default function App() {
   return (
     <div className="app-container">
       {user && (
-        <header className="header">
-          <div className="logo-container" style={{ cursor: 'pointer' }} onClick={() => navigate('dashboard')}>
-            <Database size={26} style={{ color: '#38bdf8' }} />
+        <header className="gb-header">
+          <div className="logo" onClick={() => navigate('dashboard')}>
+            <span className="mark">G</span>
             <span>GitBucket</span>
           </div>
-          
-          <nav className="nav-links">
-            <button 
-              className={`nav-link btn-secondary ${navigation.page === 'dashboard' ? 'active' : ''}`}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+
+          <nav className="nav">
+            <button
+              className={navigation.page === 'dashboard' ? 'active' : ''}
               onClick={() => navigate('dashboard')}
             >
-              <Layers size={18} />
+              <Folder size={13} />
               Repositories
             </button>
+            {/* Activity has no route this pass — rendered to match the design, inert. */}
+            <button type="button" aria-disabled="true">
+              <Activity size={13} />
+              Activity
+            </button>
             <button
-              className={`nav-link btn-secondary ${navigation.page === 'tokens' ? 'active' : ''}`}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              className={navigation.page === 'tokens' ? 'active' : ''}
               onClick={() => navigate('tokens')}
             >
-              <Key size={18} />
-              Access Tokens
+              <Key size={13} />
+              Access tokens
             </button>
-            {!authService.getConfig()?.devMode && (
-              <button
-                className={`nav-link btn-secondary ${navigation.page === 'security' ? 'active' : ''}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => navigate('security')}
-              >
-                <Shield size={18} />
-                Security
-              </button>
-            )}
           </nav>
 
-          <div className="user-profile-menu">
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#f8fafc' }}>
-                @{user.username || 'user'}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                {user.email}
-              </div>
+          <div className="user-block">
+            <Avatar name={user.username || 'user'} size={32} />
+            <div className="user-meta">
+              <span className="user-name">@{user.username || 'user'}</span>
+              <span className="user-email">{user.email}</span>
             </div>
-            <button 
-              className="btn btn-secondary btn-icon" 
-              onClick={handleLogout}
-              title="Sign Out"
-            >
-              <LogOut size={16} />
+            <button className="logout" onClick={handleLogout} title="Sign out">
+              <LogOut size={14} />
             </button>
           </div>
         </header>
