@@ -268,7 +268,6 @@ func getGitbucketURL(r *http.Request) string {
 	return fmt.Sprintf("%s://%s", scheme, r.Host)
 }
 
-// TriggerCloudBuild pulls cloudbuild.yaml from the commit and submits a build.
 // assembleBuild constructs the Cloud Build request. SubstitutionOption is set to
 // ALLOW_LOOSE so that unmatched $VAR tokens (shell variables in the clone step and
 // in user-provided cloudbuild.yaml steps) are left intact rather than rejected by
@@ -294,6 +293,7 @@ func assembleBuild(steps []*cloudbuild.BuildStep, owner, repo, branch, sha, gitb
 	return build
 }
 
+// TriggerCloudBuild pulls cloudbuild.yaml from the commit and submits a build.
 func (h *APIHandler) TriggerCloudBuild(owner, repo, branch, sha string) {
 	ctx := context.Background()
 	localRepoPath := filepath.Join(h.LocalReposRoot, strings.ToLower(owner), fmt.Sprintf("%s.git", strings.ToLower(repo)))
