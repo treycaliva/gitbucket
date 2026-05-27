@@ -2,6 +2,9 @@
 # Build and deploy GitBucket: Go backend to Cloud Run, React frontend to Firebase Hosting.
 # Preserves existing env vars / IAM / scaling on the service.
 #
+# NOTE: a `git push` to main now auto-deploys via Cloud Build (see cloudbuild.yaml and
+# scripts/deploy-build-iam.sh). This script is the manual fallback / break-glass path.
+#
 # Usage:
 #   scripts/deploy.sh                    # deploy to default service and hosting
 #   SERVICE=gitbucket-staging scripts/deploy.sh
