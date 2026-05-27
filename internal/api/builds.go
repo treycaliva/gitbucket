@@ -246,6 +246,16 @@ func readCloudBuildYaml(repoPath, sha string) ([]byte, error) {
 	return cmd.Output()
 }
 
+// projectIDFromEnv resolves the GCP project ID using the same precedence as
+// internal/config: PROJECT_ID first, then GOOGLE_CLOUD_PROJECT. Returns "" if
+// neither is set (callers keep their own empty-string handling).
+func projectIDFromEnv() string {
+	if p := os.Getenv("PROJECT_ID"); p != "" {
+		return p
+	}
+	return os.Getenv("GOOGLE_CLOUD_PROJECT")
+}
+
 func getGitbucketURL(r *http.Request) string {
 	url := os.Getenv("GITBUCKET_URL")
 	if url != "" {
@@ -294,7 +304,7 @@ func (h *APIHandler) TriggerCloudBuild(owner, repo, branch, sha string) {
 	gitbucketURL = strings.TrimSuffix(gitbucketURL, "/")
 
 	// 3. Fallback/Simulate in DEV_MODE if no credentials/project is set
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	projectID := projectIDFromEnv()
 	if os.Getenv("DEV_MODE") == "true" && (projectID == "" || os.Getenv("MOCK_GCB") == "true") {
 		log.Printf("[GCB Trigger] DEV_MODE enabled. Simulating Cloud Build dispatch...")
 		buildID := "mock-build-" + sha[:8]
@@ -317,7 +327,7 @@ func (h *APIHandler) TriggerCloudBuild(owner, repo, branch, sha string) {
 	}
 
 	if projectID == "" {
-		log.Printf("[GCB Trigger] GOOGLE_CLOUD_PROJECT environment variable is not set")
+		log.Printf("[GCB Trigger] no project configured (set PROJECT_ID or GOOGLE_CLOUD_PROJECT)")
 		return
 	}
 
@@ -603,9 +613,9 @@ func (h *APIHandler) HandleLiveLogsStream(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	projectID := projectIDFromEnv()
 	if projectID == "" {
-		_ = ws.WriteMessage(websocket.TextMessage, []byte("Error: GOOGLE_CLOUD_PROJECT environment variable is not set"))
+		_ = ws.WriteMessage(websocket.TextMessage, []byte("Error: no project configured (set PROJECT_ID or GOOGLE_CLOUD_PROJECT)"))
 		return
 	}
 
