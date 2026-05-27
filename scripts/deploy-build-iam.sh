@@ -18,6 +18,10 @@ SERVICE="${SERVICE:-gitbucket}"
 AR_REPO="${AR_REPO:-gitbucket}"
 
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+if [[ -z "$PROJECT_NUMBER" ]]; then
+  echo "Error: could not determine project number for '$PROJECT_ID'" >&2
+  exit 1
+fi
 
 # The SA the builds run as: the engine uses CLOUD_BUILD_SERVICE_ACCOUNT if set,
 # else the default Cloud Build SA.
@@ -26,7 +30,7 @@ BUILD_SA="${CLOUD_BUILD_SERVICE_ACCOUNT:-${PROJECT_NUMBER}@cloudbuild.gserviceac
 # The Cloud Run runtime SA the new revision will run as; the build SA needs
 # actAs on it to deploy. Fall back to the default compute SA.
 RUNTIME_SA="$(gcloud run services describe "$SERVICE" \
-  --region "$REGION" --project "$PROJECT_ID" \
+  --region="$REGION" --project="$PROJECT_ID" \
   --format='value(spec.template.spec.serviceAccountName)' 2>/dev/null || true)"
 if [[ -z "$RUNTIME_SA" ]]; then
   RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
@@ -62,7 +66,8 @@ else
     --repository-format=docker \
     --location="$REGION" \
     --project="$PROJECT_ID" \
-    --description="GitBucket container images"
+    --description="GitBucket container images" \
+    --quiet
 fi
 
 echo "==> done"
