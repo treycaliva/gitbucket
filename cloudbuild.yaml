@@ -1,0 +1,31 @@
+# Build/deploy pipeline for gitbucket, run by gitbucket's own Cloud Build engine
+# (internal/api/builds.go). The engine prepends an OIDC clone of the pushed branch
+# into /workspace, then runs the steps below in order.
+#
+# IMPORTANT: the engine honors ONLY the `steps:` array and, per step, only the
+# fields name/entrypoint/args/env/dir/id/waitFor. Do NOT add top-level images:,
+# options:, substitutions:, or timeout: — they are silently ignored.
+#
+# Substitutions injected by the engine: _COMMIT_SHA, _BRANCH_NAME, _REPO_OWNER,
+# _REPO_NAME, _GITBUCKET_URL.
+steps:
+  # --- CI (runs on every branch) ---
+  - id: backend-compile
+    name: golang:1.25
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /dev/null main.go
+
+  - id: frontend-build
+    name: node:20
+    entrypoint: bash
+    dir: frontend
+    args:
+      - -c
+      - |
+        set -e
+        npm ci
+        npm run build
