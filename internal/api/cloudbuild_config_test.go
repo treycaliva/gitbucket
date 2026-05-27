@@ -62,5 +62,8 @@ func TestCloudBuildYAMLOnlyUsesHonoredFieldsAndHasCISteps(t *testing.T) {
 		if step.Name == "" {
 			t.Errorf("step %q has no image name", id)
 		}
+		if len(step.Args) == 0 {
+			t.Errorf("step %q has no args", id)
+		}
 	}
 }

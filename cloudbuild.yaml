@@ -16,7 +16,7 @@ steps:
     args:
       - -c
       - |
-        set -e
+        set -euo pipefail
         CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /dev/null main.go
 
   - id: frontend-build
@@ -26,6 +26,6 @@ steps:
     args:
       - -c
       - |
-        set -e
+        set -euo pipefail
         npm ci
         npm run build
