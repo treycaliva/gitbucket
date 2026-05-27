@@ -29,3 +29,39 @@ steps:
         set -euo pipefail
         npm ci
         npm run build
+
+  # --- Deploy (main only; each step no-ops on other branches) ---
+  - id: image
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_BRANCH_NAME}" != "main" ]; then echo "skip: not main"; exit 0; fi
+        set -euo pipefail
+        docker build -t "us-central1-docker.pkg.dev/git-bucket-79382/gitbucket/gitbucket:${_COMMIT_SHA}" .
+        docker push "us-central1-docker.pkg.dev/git-bucket-79382/gitbucket/gitbucket:${_COMMIT_SHA}"
+
+  - id: backend-deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_BRANCH_NAME}" != "main" ]; then echo "skip: not main"; exit 0; fi
+        set -euo pipefail
+        gcloud run deploy gitbucket \
+          --image "us-central1-docker.pkg.dev/git-bucket-79382/gitbucket/gitbucket:${_COMMIT_SHA}" \
+          --region us-central1 \
+          --project git-bucket-79382 \
+          --quiet
+
+  - id: frontend-deploy
+    name: node:20
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_BRANCH_NAME}" != "main" ]; then echo "skip: not main"; exit 0; fi
+        set -euo pipefail
+        npx -y firebase-tools deploy --only hosting --project git-bucket-79382
