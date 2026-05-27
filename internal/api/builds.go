@@ -269,6 +269,31 @@ func getGitbucketURL(r *http.Request) string {
 }
 
 // TriggerCloudBuild pulls cloudbuild.yaml from the commit and submits a build.
+// assembleBuild constructs the Cloud Build request. SubstitutionOption is set to
+// ALLOW_LOOSE so that unmatched $VAR tokens (shell variables in the clone step and
+// in user-provided cloudbuild.yaml steps) are left intact rather than rejected by
+// Cloud Build's default MUST_MATCH validation. serviceAccount is applied only when
+// non-empty.
+func assembleBuild(steps []*cloudbuild.BuildStep, owner, repo, branch, sha, gitbucketURL, serviceAccount string) *cloudbuild.Build {
+	build := &cloudbuild.Build{
+		Steps: steps,
+		Substitutions: map[string]string{
+			"_COMMIT_SHA":    sha,
+			"_BRANCH_NAME":   branch,
+			"_REPO_OWNER":    owner,
+			"_REPO_NAME":     repo,
+			"_GITBUCKET_URL": gitbucketURL,
+		},
+		Options: &cloudbuild.BuildOptions{
+			SubstitutionOption: "ALLOW_LOOSE",
+		},
+	}
+	if serviceAccount != "" {
+		build.ServiceAccount = serviceAccount
+	}
+	return build
+}
+
 func (h *APIHandler) TriggerCloudBuild(owner, repo, branch, sha string) {
 	ctx := context.Background()
 	localRepoPath := filepath.Join(h.LocalReposRoot, strings.ToLower(owner), fmt.Sprintf("%s.git", strings.ToLower(repo)))
@@ -367,21 +392,8 @@ git clone --depth 1 --branch "$_BRANCH_NAME" "${_GITBUCKET_URL}/r/${_REPO_OWNER}
 		})
 	}
 
-	build := &cloudbuild.Build{
-		Steps: steps,
-		Substitutions: map[string]string{
-			"_COMMIT_SHA":    sha,
-			"_BRANCH_NAME":   branch,
-			"_REPO_OWNER":    owner,
-			"_REPO_NAME":     repo,
-			"_GITBUCKET_URL": gitbucketURL,
-		},
-	}
-
 	serviceAccount := os.Getenv("CLOUD_BUILD_SERVICE_ACCOUNT")
-	if serviceAccount != "" {
-		build.ServiceAccount = serviceAccount
-	}
+	build := assembleBuild(steps, owner, repo, branch, sha, gitbucketURL, serviceAccount)
 
 	// 6. Submit Build
 	op, err := gcbService.Projects.Builds.Create(projectID, build).Context(ctx).Do()
