@@ -20,6 +20,7 @@ import {
   releaseLock
 } from './db.js';
 import { downloadRepo, deleteRepo, LOCAL_REPOS_ROOT } from './gcs.js';
+import { getSyncFilePath, writeLocalSyncTimestamp, isLocalCacheUpToDate } from './utils.js';
 
 const router = Router();
 
@@ -69,36 +70,6 @@ export async function optionalWebAuth(req, res, next) {
     }
   }
   next();
-}
-
-// ----------------------------------------------------
-// LOCAL CACHE SYNC HELPER FOR READS
-// ----------------------------------------------------
-
-function getSyncFilePath(owner, repo) {
-  return path.join(LOCAL_REPOS_ROOT, owner.toLowerCase(), `${repo.toLowerCase()}.git`, 'last_sync_timestamp');
-}
-
-function writeLocalSyncTimestamp(owner, repo, updatedAtDoc) {
-  try {
-    const syncFilePath = getSyncFilePath(owner, repo);
-    const ms = updatedAtDoc.toMillis();
-    fs.writeFileSync(syncFilePath, ms.toString(), 'utf-8');
-  } catch (err) {
-    console.error(`Failed to write local sync timestamp for ${owner}/${repo}:`, err);
-  }
-}
-
-function isLocalCacheUpToDate(owner, repo, updatedAtDoc) {
-  try {
-    const syncFilePath = getSyncFilePath(owner, repo);
-    if (!fs.existsSync(syncFilePath)) return false;
-    const localMs = fs.readFileSync(syncFilePath, 'utf-8').trim();
-    const remoteMs = updatedAtDoc.toMillis().toString();
-    return localMs === remoteMs;
-  } catch (err) {
-    return false;
-  }
 }
 
 /**
