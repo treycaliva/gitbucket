@@ -276,11 +276,11 @@ func TestGetAppPublic(t *testing.T) {
 	botUID, _ := CreateBotUser(ctx, fs, slug, slug, "", "pending")
 	store := NewMemorySecretStore()
 	app, _, err := CreateApp(ctx, fs, store, CreateAppRequest{
-		Slug:         slug,
-		Name:         "Public App",
-		OwnerAccount: AccountRef{ID: "owner-" + suffix, Type: AccountTypeUser},
-		BotUserID:    botUID,
-		WebhookURL:   "https://example.test/hook",
+		Slug:               slug,
+		Name:               "Public App",
+		OwnerAccount:       AccountRef{ID: "owner-" + suffix, Type: AccountTypeUser},
+		BotUserID:          botUID,
+		WebhookURL:         "https://example.test/hook",
 		DefaultPermissions: Permissions{"issues": PermWrite, "metadata": PermRead},
 		DefaultEvents:      []string{"issues", "pull_request"},
 	})

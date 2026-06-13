@@ -37,7 +37,7 @@ func TestRequireAppJWTMiddleware(t *testing.T) {
 		if app != nil {
 			_, _ = fs.Collection(CollectionApps).Doc(app.AppID).Delete(cctx)
 		}
-		_, _ = fs.Collection("usernames").Doc(slug+"[bot]").Delete(cctx)
+		_, _ = fs.Collection("usernames").Doc(slug + "[bot]").Delete(cctx)
 		if botUID != "" {
 			_, _ = fs.Collection(CollectionUsers).Doc(botUID).Delete(cctx)
 		}

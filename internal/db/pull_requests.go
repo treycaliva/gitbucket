@@ -28,9 +28,9 @@ type PullRequest struct {
 	// on PR open. May be empty if no CODEOWNERS rules matched the diff.
 	RequestedReviewers []string `json:"requestedReviewers" firestore:"requestedReviewers"`
 
-	Mergeable            *bool     `json:"mergeable,omitempty" firestore:"mergeable,omitempty"`
-	LastCheckedSourceSHA string    `json:"lastCheckedSourceSha,omitempty" firestore:"lastCheckedSourceSha,omitempty"`
-	LastCheckedTargetSHA string    `json:"lastCheckedTargetSha,omitempty" firestore:"lastCheckedTargetSha,omitempty"`
+	Mergeable            *bool  `json:"mergeable,omitempty" firestore:"mergeable,omitempty"`
+	LastCheckedSourceSHA string `json:"lastCheckedSourceSha,omitempty" firestore:"lastCheckedSourceSha,omitempty"`
+	LastCheckedTargetSHA string `json:"lastCheckedTargetSha,omitempty" firestore:"lastCheckedTargetSha,omitempty"`
 }
 
 // CreatePullRequest transactionally creates a Pull Request and increments the repository's PR counter.

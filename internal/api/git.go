@@ -392,7 +392,7 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 		updatedMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 		if err == nil && updatedMeta != nil {
 			_ = writeLocalSyncTimestamp(localRepoPath, getUpdatedAtMs(updatedMeta))
-			
+
 			// Trigger GitHub Sync if configured
 			if ghSyncVal, ok := updatedMeta["githubSync"]; ok {
 				if ghSync, ok := ghSyncVal.(map[string]interface{}); ok {

@@ -18,9 +18,10 @@ var errRepoNotFound = fmt.Errorf("repo not found")
 // MaterializeRepo ensures a bare repo exists at <localReposRoot>/<owner>_<repo>.git.
 // In production this also syncs missing objects from GCS, but for Plan 2 we
 // trust that:
-//   (a) Tests seed the bare repo directly via seedLocalRepo (see contents_test.go), and
-//   (b) Production traffic on /api/v3 routes goes through the same Git HTTP
-//       infrastructure that already populates the local repo on prior reads.
+//
+//	(a) Tests seed the bare repo directly via seedLocalRepo (see contents_test.go), and
+//	(b) Production traffic on /api/v3 routes goes through the same Git HTTP
+//	    infrastructure that already populates the local repo on prior reads.
 //
 // The Firestore presence check is the source of truth for "does this repo
 // exist"; if the local bare repo is missing, we return NotFound (callers

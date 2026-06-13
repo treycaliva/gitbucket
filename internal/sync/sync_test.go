@@ -247,7 +247,7 @@ func TestExecuteSync(t *testing.T) {
 	}
 	runGit(githubWorkDir, "add", ".")
 	runGit(githubWorkDir, "commit", "-m", "GitHub commit")
-	
+
 	if err := os.MkdirAll(filepath.Dir(githubMockPath), 0755); err != nil {
 		t.Fatalf("failed to create github mock dir: %v", err)
 	}
@@ -308,8 +308,8 @@ func TestExecuteSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to encrypt mock token: %v", err)
 	}
-	
-	secretRef := firestoreClient.Collection("repositories").Doc(owner+"_"+repo).Collection("secrets").Doc("github")
+
+	secretRef := firestoreClient.Collection("repositories").Doc(owner + "_" + repo).Collection("secrets").Doc("github")
 	_, err = secretRef.Set(ctx, map[string]interface{}{
 		"encryptedToken": encToken,
 		"encryptedDEK":   encDEK,
@@ -335,4 +335,3 @@ func TestExecuteSync(t *testing.T) {
 		t.Errorf("expected GitHub mock repo to contain 'GitBucket commit', got log: %s", logOutput)
 	}
 }
-

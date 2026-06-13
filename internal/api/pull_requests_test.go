@@ -836,4 +836,3 @@ func TestPullRequestMergeabilityAndUpdates(t *testing.T) {
 		}
 	})
 }
-
