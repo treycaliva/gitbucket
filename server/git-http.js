@@ -10,6 +10,7 @@ import {
   verifyPAT 
 } from './db.js';
 import { downloadRepo, uploadRepo, LOCAL_REPOS_ROOT } from './gcs.js';
+import { getSyncFilePath, writeLocalSyncTimestamp, isLocalCacheUpToDate } from './utils.js';
 
 const router = Router();
 
@@ -21,41 +22,6 @@ try {
 } catch (err) {
   console.error('Error finding git-http-backend:', err);
   gitHttpBackendPath = '/usr/lib/git-core/git-http-backend'; // Fallback
-}
-
-/**
- * Helper to get local sync timestamp file path
- */
-function getSyncFilePath(owner, repo) {
-  return path.join(LOCAL_REPOS_ROOT, owner.toLowerCase(), `${repo.toLowerCase()}.git`, 'last_sync_timestamp');
-}
-
-/**
- * Helper to update local sync timestamp to match firestore updatedAt
- */
-function writeLocalSyncTimestamp(owner, repo, updatedAtDoc) {
-  try {
-    const syncFilePath = getSyncFilePath(owner, repo);
-    const ms = updatedAtDoc.toMillis();
-    fs.writeFileSync(syncFilePath, ms.toString(), 'utf-8');
-  } catch (err) {
-    console.error(`Failed to write local sync timestamp for ${owner}/${repo}:`, err);
-  }
-}
-
-/**
- * Checks if local repository cache is up to date with Firestore updatedAt
- */
-function isLocalCacheUpToDate(owner, repo, updatedAtDoc) {
-  try {
-    const syncFilePath = getSyncFilePath(owner, repo);
-    if (!fs.existsSync(syncFilePath)) return false;
-    const localMs = fs.readFileSync(syncFilePath, 'utf-8').trim();
-    const remoteMs = updatedAtDoc.toMillis().toString();
-    return localMs === remoteMs;
-  } catch (err) {
-    return false;
-  }
 }
 
 /**
