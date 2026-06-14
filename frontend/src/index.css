@@ -1477,6 +1477,16 @@ input[type="checkbox"] {
 .gb-chip.err    { color: var(--gb-err);    border-color: rgba(248,113,113,0.25); background: var(--gb-err-dim); }
 .gb-chip.merged { color: var(--gb-merged); border-color: rgba(167,139,250,0.25); background: var(--gb-merged-dim); }
 
+.gb-error-banner {
+  background: var(--gb-err-dim);
+  border: 1px solid rgba(248,113,113,0.25);
+  color: var(--gb-err);
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .gb-avatar {
   display: inline-grid; place-items: center;
   border-radius: 50%;

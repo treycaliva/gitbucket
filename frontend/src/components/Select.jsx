@@ -1,17 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 
-/**
- * Custom drop button styled per the v2 handoff (.gb-select).
- * Renders a real <button> + popover menu — not a native <select> — so the
- * chevron and muted label prefix can be styled directly.
- *
- * Props:
- *   label    — muted prefix shown before the value, e.g. "Type:"
- *   value    — currently selected option value
- *   options  — [{ value, label }]
- *   onChange — (value) => void
- */
+// Real <button> + popover (not a native <select>) so the chevron and muted
+// "label:" prefix can be styled directly. options: [{ value, label }].
 export default function Select({ label, value, options = [], onChange }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '../apiClient';
 import { Download } from 'lucide-react';
 import Card from '../components/Card';
+import PageHeader from '../components/PageHeader';
 
 export default function SettingsAppsInstall({ slug, onNavigate }) {
   const [app, setApp] = useState(null);
@@ -53,14 +54,7 @@ export default function SettingsAppsInstall({ slug, onNavigate }) {
   }
   if (error && !app) {
     return (
-      <div style={{
-        background: 'var(--gb-err-dim)',
-        border: '1px solid rgba(248,113,113,0.25)',
-        color: 'var(--gb-err)',
-        padding: '12px 14px',
-        borderRadius: 8,
-        fontSize: 13,
-      }}>
+      <div className="gb-error-banner">
         {error}
       </div>
     );
@@ -70,14 +64,9 @@ export default function SettingsAppsInstall({ slug, onNavigate }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.015em', color: 'var(--gb-fg)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Download size={18} style={{ color: 'var(--gb-accent)' }} /> Install {app.name}
-        </h1>
-        <p style={{ fontSize: 13, color: 'var(--gb-fg-3)', marginTop: 6, maxWidth: 760, lineHeight: 1.5 }}>
-          Choose which repositories this App can access on your account.
-        </p>
-      </div>
+      <PageHeader icon={<Download size={18} style={{ color: 'var(--gb-accent)' }} />} title={`Install ${app.name}`}>
+        Choose which repositories this App can access on your account.
+      </PageHeader>
 
       <Card style={{ padding: 16, maxWidth: 640 }}>
         <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--gb-fg)', marginTop: 0, marginBottom: 16 }}>
@@ -119,15 +108,7 @@ export default function SettingsAppsInstall({ slug, onNavigate }) {
         )}
 
         {error && (
-          <div style={{
-            marginTop: 16,
-            background: 'var(--gb-err-dim)',
-            border: '1px solid rgba(248,113,113,0.25)',
-            color: 'var(--gb-err)',
-            padding: '12px 14px',
-            borderRadius: 8,
-            fontSize: 13,
-          }}>
+          <div className="gb-error-banner" style={{ marginTop: 16 }}>
             {error}
           </div>
         )}

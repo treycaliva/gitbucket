@@ -6,28 +6,23 @@ import { initials, colorFor } from '../utils/avatarColor';
 
 export default function LatestCommitBar({ owner, repo, branch, onViewCommits }) {
   const [head, setHead] = useState(null);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!branch) return;
     let cancelled = false;
     // Reset so a branch switch clears the prior commit instead of flashing it.
     setHead(null);
-    setError('');
     apiClient
       .get(`/api/repos/${owner}/${repo}/refs/${encodeURIComponent(branch)}/head`)
       .then((data) => {
         if (!cancelled) setHead(data);
       })
-      .catch((err) => {
-        if (!cancelled) setError(err.message || 'Failed to load latest commit');
-      });
+      .catch(() => {}); // ponytail: on failure head stays null and we render nothing
     return () => {
       cancelled = true;
     };
   }, [owner, repo, branch]);
 
-  if (error) return null;
   if (!head || !head.sha) return null;
 
   return (

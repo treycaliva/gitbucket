@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '../apiClient';
 import { Boxes, Package, PackageCheck } from 'lucide-react';
 import Card from '../components/Card';
+import PageHeader from '../components/PageHeader';
 
 export default function SettingsApps({ onNavigate }) {
   const [owned, setOwned] = useState([]);
@@ -14,14 +15,9 @@ export default function SettingsApps({ onNavigate }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.015em', color: 'var(--gb-fg)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Boxes size={18} style={{ color: 'var(--gb-accent)' }} /> GitHub Apps
-        </h1>
-        <p style={{ fontSize: 13, color: 'var(--gb-fg-3)', marginTop: 6, maxWidth: 760, lineHeight: 1.5 }}>
-          Manage the GitHub Apps you own and the installations enabled on your account.
-        </p>
-      </div>
+      <PageHeader icon={<Boxes size={18} style={{ color: 'var(--gb-accent)' }} />} title="GitHub Apps">
+        Manage the GitHub Apps you own and the installations enabled on your account.
+      </PageHeader>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <Card style={{ padding: 16 }}>

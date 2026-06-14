@@ -3,6 +3,7 @@ import { apiClient } from '../apiClient';
 import { parseManifestFromURL } from '../utils/manifestUrl';
 import { AppWindow } from 'lucide-react';
 import Card from '../components/Card';
+import PageHeader from '../components/PageHeader';
 
 export default function SettingsAppsNew({ user, onNavigate }) {
   const [manifest, setManifest] = useState(null);
@@ -34,14 +35,7 @@ export default function SettingsAppsNew({ user, onNavigate }) {
   if (error && !manifest) {
     return (
       <div>
-        <div style={{ marginBottom: 24 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.015em', color: 'var(--gb-fg)', margin: 0 }}>
-            Invalid request
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--gb-fg-3)', marginTop: 6, maxWidth: 760, lineHeight: 1.5 }}>
-            {error}
-          </p>
-        </div>
+        <PageHeader title="Invalid request">{error}</PageHeader>
         <button className="btn btn-secondary" onClick={() => onNavigate('dashboard')}>
           Back to dashboard
         </button>
@@ -61,14 +55,9 @@ export default function SettingsAppsNew({ user, onNavigate }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.015em', color: 'var(--gb-fg)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
-          <AppWindow size={18} style={{ color: 'var(--gb-accent)' }} /> Register GitHub App
-        </h1>
-        <p style={{ fontSize: 13, color: 'var(--gb-fg-3)', marginTop: 6, maxWidth: 760, lineHeight: 1.5 }}>
-          <strong style={{ color: 'var(--gb-fg-2)' }}>{manifest.name}</strong> is requesting to register an App on your account ({user?.email || 'logged in user'}).
-        </p>
-      </div>
+      <PageHeader icon={<AppWindow size={18} style={{ color: 'var(--gb-accent)' }} />} title="Register GitHub App">
+        <strong style={{ color: 'var(--gb-fg-2)' }}>{manifest.name}</strong> is requesting to register an App on your account ({user?.email || 'logged in user'}).
+      </PageHeader>
 
       <Card style={{ padding: 16, maxWidth: 640 }}>
         <h3 style={{ ...heading, marginTop: 0 }}>App URL</h3>
@@ -96,15 +85,7 @@ export default function SettingsAppsNew({ user, onNavigate }) {
         </ul>
 
         {error && (
-          <div style={{
-            marginTop: 16,
-            background: 'var(--gb-err-dim)',
-            border: '1px solid rgba(248,113,113,0.25)',
-            color: 'var(--gb-err)',
-            padding: '12px 14px',
-            borderRadius: 8,
-            fontSize: 13,
-          }}>
+          <div className="gb-error-banner" style={{ marginTop: 16 }}>
             {error}
           </div>
         )}

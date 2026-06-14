@@ -197,15 +197,7 @@ export default function Security({ user }) {
       </div>
 
       {error && (
-        <div style={{
-          background: 'var(--gb-err-dim)',
-          border: '1px solid rgba(248,113,113,0.25)',
-          color: 'var(--gb-err)',
-          padding: '12px 14px',
-          borderRadius: 8,
-          fontSize: 13,
-          marginBottom: 22,
-        }}>
+        <div className="gb-error-banner" style={{ marginBottom: 22 }}>
           {error}
         </div>
       )}

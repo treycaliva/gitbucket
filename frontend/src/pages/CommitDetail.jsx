@@ -95,14 +95,7 @@ export default function CommitDetail({ owner, repo, sha, onNavigate }) {
       </div>
 
       {error ? (
-        <div style={{
-          background: 'var(--gb-err-dim)',
-          border: '1px solid rgba(248,113,113,0.25)',
-          color: 'var(--gb-err)',
-          padding: '12px 14px',
-          borderRadius: 8,
-          fontSize: 13,
-        }}>
+        <div className="gb-error-banner">
           {error}
         </div>
       ) : (
