@@ -280,12 +280,12 @@ func (h *APIHandler) GetPullRequest(w http.ResponseWriter, r *http.Request) {
 							_, _ = runGit(tempDir, "config", "user.name", "mergecheck")
 							_, _ = runGit(tempDir, "config", "user.email", "mergecheck@example.com")
 							_, mergeErr := runGit(tempDir, "merge", "--no-commit", "--no-ff", "origin/"+pr.SourceBranch)
-							
+
 							isMergeable := mergeErr == nil
 							pr.Mergeable = &isMergeable
 							pr.LastCheckedSourceSHA = sourceSha
 							pr.LastCheckedTargetSHA = targetSha
-							
+
 							_ = db.UpdatePullRequestMergeableStatus(r.Context(), h.FirestoreClient, owner, repo, number, pr.Mergeable, sourceSha, targetSha)
 						}
 					}
@@ -900,4 +900,3 @@ func (h *APIHandler) UpdatePullRequestBranch(w http.ResponseWriter, r *http.Requ
 		"status":  "updated",
 	})
 }
-

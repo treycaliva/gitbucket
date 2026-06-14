@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/golang-jwt/jwt/v4"
 	"gitbucket/internal/db"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 func signTestJWT(t *testing.T, appID string, key *rsa.PrivateKey, iat, exp time.Time) string {

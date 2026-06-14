@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"gitbucket/internal/apps"
 	"gitbucket/internal/apps/testfixtures"
 	"gitbucket/internal/db"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestTokenMintPopulatesRepositoriesForSelected(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
 )
 
@@ -220,14 +221,25 @@ func UploadRepo(ctx context.Context, client *storage.Client, bucketName, owner, 
 	}
 
 	// 4. Delete GCS files that are no longer present locally
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(20) // Limit concurrency to avoid rate limits
+
 	for rel, attrs := range gcsFiles {
 		if _, exists := localFiles[rel]; !exists {
-			log.Printf("[UploadRepo Delete] Deleting object in GCS: %s", attrs.Name)
-			obj := bucket.Object(attrs.Name)
-			if err := obj.Delete(ctx); err != nil && err != storage.ErrObjectNotExist {
-				return fmt.Errorf("failed to delete GCS object: %w", err)
-			}
+			name := attrs.Name // capture for goroutine
+			eg.Go(func() error {
+				log.Printf("[UploadRepo Delete] Deleting object in GCS: %s", name)
+				obj := bucket.Object(name)
+				if err := obj.Delete(egCtx); err != nil && err != storage.ErrObjectNotExist {
+					return fmt.Errorf("failed to delete GCS object %s: %w", name, err)
+				}
+				return nil
+			})
 		}
+	}
+
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 
 	return nil

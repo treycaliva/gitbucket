@@ -9,8 +9,8 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
 
-	"gitbucket/internal/apps"
 	"gitbucket/internal/api/v3/v3fmt"
+	"gitbucket/internal/apps"
 )
 
 // V3Handler bundles the dependencies needed by GitHub-shape handlers.

@@ -22,15 +22,15 @@ import (
 
 	"cloud.google.com/go/compute/metadata"
 	"cloud.google.com/go/firestore"
+	credentials "cloud.google.com/go/iam/credentials/apiv1"
 	loggingapiv2 "cloud.google.com/go/logging/apiv2"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"cloud.google.com/go/storage"
-	credentials "cloud.google.com/go/iam/credentials/apiv1"
-	credentialspb "google.golang.org/genproto/googleapis/iam/credentials/v1"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	"google.golang.org/api/cloudbuild/v1"
 	"google.golang.org/api/idtoken"
+	credentialspb "google.golang.org/genproto/googleapis/iam/credentials/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
@@ -669,10 +669,10 @@ func (h *APIHandler) HandleCloudBuildWebhook(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		
+
 		gitbucketURL := getGitbucketURL(r)
 		audience := fmt.Sprintf("%s/api/webhooks/cloudbuild", gitbucketURL)
-		
+
 		_, err := VerifyCloudBuildOIDCToken(r.Context(), tokenStr, audience)
 		if err != nil {
 			log.Printf("[GCB Webhook] OIDC token validation failed: %v", err)

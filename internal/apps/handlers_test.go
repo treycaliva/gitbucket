@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"gitbucket/internal/db"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestAppHandlersEndToEnd(t *testing.T) {

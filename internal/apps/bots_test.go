@@ -28,12 +28,12 @@ func TestBotUsernameValidator(t *testing.T) {
 		ok   bool
 	}{
 		{"claude-code", "claude-code[bot]", true},
-		{"a", "", false},             // too short (1 char)
-		{"ab", "", false},            // too short (2 chars, fence-post)
-		{"abc", "abc[bot]", true},   // exactly 3 chars (minimum valid)
+		{"a", "", false},          // too short (1 char)
+		{"ab", "", false},         // too short (2 chars, fence-post)
+		{"abc", "abc[bot]", true}, // exactly 3 chars (minimum valid)
 		{strings.Repeat("a", 20), strings.Repeat("a", 20) + "[bot]", true}, // exactly 20 chars (maximum valid)
-		{string(tooLong), "", false}, // too long (21 chars)
-		{"bad!", "", false},          // invalid chars
+		{string(tooLong), "", false},                                       // too long (21 chars)
+		{"bad!", "", false},                                                // invalid chars
 	}
 	for _, c := range cases {
 		got, err := BotUsernameForSlug(c.slug)

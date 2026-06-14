@@ -75,7 +75,7 @@ type PullRequestPayload struct {
 	Sender     SenderRef
 }
 
-func (p PullRequestPayload) Event() EventType    { return EventPullRequest }
+func (p PullRequestPayload) Event() EventType     { return EventPullRequest }
 func (p PullRequestPayload) Owner() string        { return p.OwnerLogin }
 func (p PullRequestPayload) SenderRef() SenderRef { return p.Sender }
 
@@ -91,7 +91,7 @@ type PushPayload struct {
 	Sender     SenderRef
 }
 
-func (p PushPayload) Event() EventType    { return EventPush }
+func (p PushPayload) Event() EventType     { return EventPush }
 func (p PushPayload) Owner() string        { return p.OwnerLogin }
 func (p PushPayload) SenderRef() SenderRef { return p.Sender }
 
@@ -104,7 +104,7 @@ type InstallationPayload struct {
 	Sender  SenderRef
 }
 
-func (p InstallationPayload) Event() EventType    { return EventInstallation }
+func (p InstallationPayload) Event() EventType     { return EventInstallation }
 func (p InstallationPayload) Owner() string        { return p.Account.ID }
 func (p InstallationPayload) SenderRef() SenderRef { return p.Sender }
 
