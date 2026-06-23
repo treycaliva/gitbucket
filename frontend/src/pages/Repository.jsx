@@ -3288,17 +3288,21 @@ const parseFileDiffLines = (rawLines) => {
 
 const buildFileTree = (files) => {
   const root = { name: 'root', path: '', isDirectory: true, children: [] };
+  // ⚡ Bolt optimization: Use an O(1) hash map lookup instead of O(N) array search on current.children
+  // This reduces tree construction from O(N * D) to O(N), significantly speeding up large PR rendering
+  const nodeMap = new Map();
+  nodeMap.set('', root);
   
   files.forEach((file, index) => {
     const parts = file.path.split('/');
-    let current = root;
     let currentPath = '';
     
     parts.forEach((part, partIndex) => {
+      const parentPath = currentPath;
       currentPath = currentPath ? `${currentPath}/${part}` : part;
       const isLast = partIndex === parts.length - 1;
       
-      let child = current.children.find(c => c.name === part && c.isDirectory === !isLast);
+      let child = nodeMap.get(currentPath);
       if (!child) {
         child = {
           name: part,
@@ -3309,15 +3313,15 @@ const buildFileTree = (files) => {
           additions: 0,
           deletions: 0
         };
-        current.children.push(child);
+        const parent = nodeMap.get(parentPath);
+        parent.children.push(child);
+        nodeMap.set(currentPath, child);
       }
       
       if (isLast) {
         child.additions = file.additions;
         child.deletions = file.deletions;
       }
-      
-      current = child;
     });
   });
 
