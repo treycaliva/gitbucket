@@ -805,38 +805,68 @@ func (h *APIHandler) DecorateCommitsWithStatuses(ctx context.Context, owner, rep
 	if len(commits) == 0 {
 		return
 	}
-	statusQuery := h.FirestoreClient.Collection("commit_statuses").
-		Where("owner", "==", owner).
-		Where("repo", "==", repo)
-	statusDocs, err := statusQuery.Documents(ctx).GetAll()
-	if err != nil {
-		log.Printf("DecorateCommitsWithStatuses: Firestore query failed: %v", err)
+
+	uniqueShasMap := make(map[string]struct{})
+	for _, c := range commits {
+		if c.SHA != "" {
+			uniqueShasMap[c.SHA] = struct{}{}
+		}
+	}
+	var shas []string
+	for sha := range uniqueShasMap {
+		shas = append(shas, sha)
+	}
+	if len(shas) == 0 {
 		return
 	}
+
 	shaToStatus := make(map[string]map[string]interface{})
-	for _, doc := range statusDocs {
-		var data map[string]interface{}
-		if err := doc.DataTo(&data); err == nil {
-			sha, _ := data["sha"].(string)
-			if sha != "" {
-				existing, exists := shaToStatus[sha]
-				if !exists {
-					shaToStatus[sha] = data
-				} else {
-					var curCreated, newCreated time.Time
-					if t, ok := existing["createdAt"].(time.Time); ok {
-						curCreated = t
-					}
-					if t, ok := data["createdAt"].(time.Time); ok {
-						newCreated = t
-					}
-					if newCreated.After(curCreated) {
+
+	// Firestore `in` query limit is 30 elements
+	chunkSize := 30
+	for i := 0; i < len(shas); i += chunkSize {
+		end := i + chunkSize
+		if end > len(shas) {
+			end = len(shas)
+		}
+		chunk := shas[i:end]
+
+		statusQuery := h.FirestoreClient.Collection("commit_statuses").
+			Where("owner", "==", owner).
+			Where("repo", "==", repo).
+			Where("sha", "in", chunk)
+
+		statusDocs, err := statusQuery.Documents(ctx).GetAll()
+		if err != nil {
+			log.Printf("DecorateCommitsWithStatuses: Firestore query failed for chunk: %v", err)
+			continue
+		}
+
+		for _, doc := range statusDocs {
+			var data map[string]interface{}
+			if err := doc.DataTo(&data); err == nil {
+				sha, _ := data["sha"].(string)
+				if sha != "" {
+					existing, exists := shaToStatus[sha]
+					if !exists {
 						shaToStatus[sha] = data
+					} else {
+						var curCreated, newCreated time.Time
+						if t, ok := existing["createdAt"].(time.Time); ok {
+							curCreated = t
+						}
+						if t, ok := data["createdAt"].(time.Time); ok {
+							newCreated = t
+						}
+						if newCreated.After(curCreated) {
+							shaToStatus[sha] = data
+						}
 					}
 				}
 			}
 		}
 	}
+
 	for i := range commits {
 		if statusData, ok := shaToStatus[commits[i].SHA]; ok {
 			statusVal, _ := statusData["status"].(string)
