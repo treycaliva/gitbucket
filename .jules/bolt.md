@@ -10,3 +10,7 @@
 ## 2025-02-18 - Optimize commit statuses query using chunked IN queries
 **Learning:** `DecorateCommitsWithStatuses` previously fetched all commit statuses for an entire repository unbounded. For large repositories, pulling every single status and evaluating it in memory causes massive memory usage, high latency, and excessive Firestore egress costs.
 **Action:** Always filter Firestore queries explicitly by the entities requested. Because Firestore `in` queries have a hard limit of 30 items, when querying for an array of items (like a batch of SHAs), iterate over the input array and chunk it into batches of `min(len, 30)`, merging the results locally.
+
+## 2025-02-18 - Optimize commit statuses chunked queries with concurrency
+**Learning:** `DecorateCommitsWithStatuses` fetches Firestore chunked queries sequentially. For PRs or branches with hundreds of commits, making ceiling(N/30) sequential HTTP queries to Firestore caused significant network I/O latency.
+**Action:** When working around the Firestore 30-element `IN` query limit, parallelize the chunked queries using `golang.org/x/sync/errgroup` with a concurrency limit (`g.SetLimit(10)`). This drastically reduces total network latency for fetching commit statuses without causing socket exhaustion. Protect the aggregating maps using `sync.Mutex`.
