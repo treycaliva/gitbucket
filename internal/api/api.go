@@ -20,6 +20,9 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/go-chi/chi/v5"
 
+	"golang.org/x/sync/errgroup"
+	gosync "sync"
+
 	"gitbucket/internal/apps"
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
@@ -822,8 +825,16 @@ func (h *APIHandler) DecorateCommitsWithStatuses(ctx context.Context, owner, rep
 
 	shaToStatus := make(map[string]map[string]interface{})
 
-	// Firestore `in` query limit is 30 elements
+	// ⚡ Bolt: Fetch commit statuses concurrently
+	// Firestore `in` queries are limited to 30 elements.
+	// For large repositories with many commits, fetching these sequentially is slow.
+	// We chunk the SHAs and execute the queries concurrently (bounded to 10 workers)
+	// to reduce overall latency, safely merging the results into the shared map.
 	chunkSize := 30
+	var mu gosync.Mutex
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(10)
+
 	for i := 0; i < len(shas); i += chunkSize {
 		end := i + chunkSize
 		if end > len(shas) {
@@ -831,41 +842,69 @@ func (h *APIHandler) DecorateCommitsWithStatuses(ctx context.Context, owner, rep
 		}
 		chunk := shas[i:end]
 
-		statusQuery := h.FirestoreClient.Collection("commit_statuses").
-			Where("owner", "==", owner).
-			Where("repo", "==", repo).
-			Where("sha", "in", chunk)
+		g.Go(func() error {
+			// Shadow chunk inside the closure to avoid Go < 1.22 loop variable capture bugs
+			localChunk := chunk
+			statusQuery := h.FirestoreClient.Collection("commit_statuses").
+				Where("owner", "==", owner).
+				Where("repo", "==", repo).
+				Where("sha", "in", localChunk)
 
-		statusDocs, err := statusQuery.Documents(ctx).GetAll()
-		if err != nil {
-			log.Printf("DecorateCommitsWithStatuses: Firestore query failed for chunk: %v", err)
-			continue
-		}
+			statusDocs, err := statusQuery.Documents(gCtx).GetAll()
+			if err != nil {
+				log.Printf("DecorateCommitsWithStatuses: Firestore query failed for chunk: %v", err)
+				return nil // Don't fail the entire request, just skip this chunk
+			}
 
-		for _, doc := range statusDocs {
-			var data map[string]interface{}
-			if err := doc.DataTo(&data); err == nil {
-				sha, _ := data["sha"].(string)
-				if sha != "" {
-					existing, exists := shaToStatus[sha]
-					if !exists {
-						shaToStatus[sha] = data
-					} else {
-						var curCreated, newCreated time.Time
-						if t, ok := existing["createdAt"].(time.Time); ok {
-							curCreated = t
-						}
-						if t, ok := data["createdAt"].(time.Time); ok {
-							newCreated = t
-						}
-						if newCreated.After(curCreated) {
-							shaToStatus[sha] = data
+			localMap := make(map[string]map[string]interface{})
+			for _, doc := range statusDocs {
+				var data map[string]interface{}
+				if err := doc.DataTo(&data); err == nil {
+					sha, _ := data["sha"].(string)
+					if sha != "" {
+						existing, exists := localMap[sha]
+						if !exists {
+							localMap[sha] = data
+						} else {
+							var curCreated, newCreated time.Time
+							if t, ok := existing["createdAt"].(time.Time); ok {
+								curCreated = t
+							}
+							if t, ok := data["createdAt"].(time.Time); ok {
+								newCreated = t
+							}
+							if newCreated.After(curCreated) {
+								localMap[sha] = data
+							}
 						}
 					}
 				}
 			}
-		}
+
+			mu.Lock()
+			for sha, data := range localMap {
+				existing, exists := shaToStatus[sha]
+				if !exists {
+					shaToStatus[sha] = data
+				} else {
+					var curCreated, newCreated time.Time
+					if t, ok := existing["createdAt"].(time.Time); ok {
+						curCreated = t
+					}
+					if t, ok := data["createdAt"].(time.Time); ok {
+						newCreated = t
+					}
+					if newCreated.After(curCreated) {
+						shaToStatus[sha] = data
+					}
+				}
+			}
+			mu.Unlock()
+
+			return nil
+		})
 	}
+	_ = g.Wait()
 
 	for i := range commits {
 		if statusData, ok := shaToStatus[commits[i].SHA]; ok {
