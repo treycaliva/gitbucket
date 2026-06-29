@@ -10,3 +10,7 @@
 ## 2025-02-18 - Optimize commit statuses query using chunked IN queries
 **Learning:** `DecorateCommitsWithStatuses` previously fetched all commit statuses for an entire repository unbounded. For large repositories, pulling every single status and evaluating it in memory causes massive memory usage, high latency, and excessive Firestore egress costs.
 **Action:** Always filter Firestore queries explicitly by the entities requested. Because Firestore `in` queries have a hard limit of 30 items, when querying for an array of items (like a batch of SHAs), iterate over the input array and chunk it into batches of `min(len, 30)`, merging the results locally.
+
+## 2024-05-24 - React Cascading Re-Renders in `useEffect`
+**Learning:** Calling `setState` synchronously within a `useEffect` to respond to prop changes causes a cascading re-render (two render passes) which is flagged as a performance issue by React's linter and can cause visual flashing (e.g., stale commits rendering briefly before clearing).
+**Action:** Always store the previous prop value in state (e.g., `prevBranch`) and directly update dependent state during the render cycle if `prop !== prevProp`, completely avoiding the `useEffect` overhead for synchronous state derivation.
