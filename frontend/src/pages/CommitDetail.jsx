@@ -1,7 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../apiClient';
 import { ArrowLeft, FileText } from 'lucide-react';
 import Card from '../components/Card';
+
+const renderDiffLine = (line, idx) => {
+  let className = 'diff-line';
+  if (line.startsWith('+++') || line.startsWith('---')) {
+    className += ' diff-line-meta';
+  } else if (line.startsWith('+')) {
+    className += ' diff-line-add';
+  } else if (line.startsWith('-')) {
+    className += ' diff-line-del';
+  } else if (line.startsWith('@@')) {
+    className += ' diff-line-header';
+  } else if (line.startsWith('diff --git') || line.startsWith('index ')) {
+    className += ' diff-line-meta';
+  }
+
+  return (
+    <div key={idx} className={className}>
+      {line}
+    </div>
+  );
+};
 
 export default function CommitDetail({ owner, repo, sha, onNavigate }) {
   const [diff, setDiff] = useState('');
@@ -25,26 +46,10 @@ export default function CommitDetail({ owner, repo, sha, onNavigate }) {
     loadDiff();
   }, [owner, repo, sha]);
 
-  const renderDiffLine = (line, idx) => {
-    let className = 'diff-line';
-    if (line.startsWith('+++') || line.startsWith('---')) {
-      className += ' diff-line-meta';
-    } else if (line.startsWith('+')) {
-      className += ' diff-line-add';
-    } else if (line.startsWith('-')) {
-      className += ' diff-line-del';
-    } else if (line.startsWith('@@')) {
-      className += ' diff-line-header';
-    } else if (line.startsWith('diff --git') || line.startsWith('index ')) {
-      className += ' diff-line-meta';
-    }
-
-    return (
-      <div key={idx} className={className}>
-        {line}
-      </div>
-    );
-  };
+  const diffLines = useMemo(() => {
+    if (!diff) return [];
+    return diff.split('\n').map((line, idx) => renderDiffLine(line, idx));
+  }, [diff]);
 
   if (loading) {
     return (
@@ -122,7 +127,7 @@ export default function CommitDetail({ owner, repo, sha, onNavigate }) {
             <span>Changeset details</span>
           </div>
           <div style={{ padding: '0.5rem 0' }}>
-            {diff.split('\n').map((line, idx) => renderDiffLine(line, idx))}
+            {diffLines}
           </div>
         </Card>
       )}
