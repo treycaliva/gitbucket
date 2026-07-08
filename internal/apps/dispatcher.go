@@ -22,7 +22,7 @@ func NewDispatcherHandler(fs *firestore.Client, oidcAudience string) *Dispatcher
 	return &DispatcherHandler{
 		FS:           fs,
 		OIDCAudience: oidcAudience,
-		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
+		HTTPClient:   SafeHTTPClient(),
 	}
 }
 
