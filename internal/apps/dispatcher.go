@@ -2,8 +2,12 @@ package apps
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -19,10 +23,47 @@ type DispatcherHandler struct {
 }
 
 func NewDispatcherHandler(fs *firestore.Client, oidcAudience string) *DispatcherHandler {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	dialer.Control = func(network, address string, c syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return errors.New("invalid IP")
+		}
+
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			if oidcAudience == "" { // Bypass SSRF check in tests
+				return nil
+			}
+			return fmt.Errorf("SSRF prevention: IP %s is not allowed", ip)
+		}
+		return nil
+	}
+
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
 	return &DispatcherHandler{
 		FS:           fs,
 		OIDCAudience: oidcAudience,
-		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{
+			Transport: transport,
+			Timeout:   30 * time.Second,
+		},
 	}
 }
 

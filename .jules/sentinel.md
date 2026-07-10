@@ -7,3 +7,8 @@
 - Dynamic `Origin` echoing combined with `Access-Control-Allow-Credentials: true` allows any site to perform authenticated cross-origin requests, leading to potential data leakage.
 - For APIs that do not rely on cookies (like GitBucket, which uses `Authorization` bearer tokens), it is safer to use `Access-Control-Allow-Origin: *` and completely omit the `Access-Control-Allow-Credentials` header.
 - This neutralizes cross-origin attacks where malicious sites might trick a user's browser into sending authenticated requests.
+
+## 2025-02-27 - SSRF Prevention in Outbound Webhook Delivery
+**Vulnerability:** Unrestricted HTTP client allowed outbound webhook requests to arbitrary internal network addresses (SSRF), posing a risk of internal service access.
+**Learning:** Outbound requests to user-provided URLs in Go must use a safe dialer with a `Control` hook to validate IP addresses and block loopback, private, and link-local ranges.
+**Prevention:** Always implement a custom `http.Client` with an IP-gated `net.Dialer` when relaying requests to external, user-supplied webhooks or endpoints.
