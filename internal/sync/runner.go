@@ -84,7 +84,8 @@ func ExecuteSync(ctx context.Context, firestoreClient *firestore.Client, storage
 
 	// 5. Download repository from GCS to local bare repo directory
 	localRepoPath := filepath.Join(localReposRoot, strings.ToLower(owner), fmt.Sprintf("%s.git", strings.ToLower(repo)))
-	foundAny, err := gcs.DownloadRepo(heartbeatCtx, storageClient, bucketName, owner, repo, localReposRoot)
+	// Leased lock is held (acquired above), so prune to an exact GCS mirror.
+	foundAny, err := gcs.DownloadRepo(heartbeatCtx, storageClient, bucketName, owner, repo, localReposRoot, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download repo from GCS: %w", err)
 	}

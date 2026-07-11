@@ -36,7 +36,7 @@ There is no `.github/` directory — nothing runs `go build`, `go test`, lint, o
 
 ## Should fix before invites go out
 
-1. **Stale-ref resurrection across instances.** `gcs.DownloadRepo` is a merge, not a mirror — it never deletes local files absent from GCS (`internal/gcs/gcs.go:70-119`), while `UploadRepo` *does* delete GCS files missing locally. A stale instance can retain a deleted/force-rewound ref and resurrect it on its next push. Until `DownloadRepo` prunes, run the beta with `max-instances=1`.
+1. ~~**Stale-ref resurrection across instances.**~~ **Fixed on this branch.** `gcs.DownloadRepo` now takes a `prune` flag: on lock-holding sync paths (push, PR merge/update, branch delete, GitHub sync) it mirror-prunes local files absent from GCS, so a deleted/force-rewound ref can no longer linger in a stale cache and resurrect on the next push. Read-only paths (browse, PR views) stay merge-only to avoid racing a concurrent push. The `max-instances=1` workaround is no longer required for this issue.
 2. **Two competing lock implementations share one Firestore doc.** The push path uses `db.AcquireLock` with local wall-clock expiry (`internal/db/db.go:410`); the GitHub-sync path uses `AcquireLeasedLock` with Firestore server time (`internal/sync/locks.go:37`). Both write `locks/{owner}_{repo}` with different field schemas. Consolidate on the server-time variant.
 3. **No rate limiting anywhere** (`main.go:250-254`). PAT Basic-Auth is brute-forceable in principle (tokens are 160-bit so the real risk is abuse/cost, not compromise). Add a basic limiter before opening signups.
 4. **Unguarded detached goroutines + Cloud Run CPU throttling.** `go h.TriggerCloudBuild(...)` (`internal/api/git.go:421`) and the sync goroutine (`internal/api/sync.go:366`) have no `recover()` — a panic kills the instance — and post-response work gets CPU-throttled unless the service runs CPU-always-allocated. Add `recover()` and set `--no-cpu-throttling` (or move the work to Cloud Tasks).
@@ -74,7 +74,7 @@ There is no `.github/` directory — nothing runs `go build`, `go test`, lint, o
 - [x] Scope-check `/api/v3/*` against the installation account — `RequireRepoScope` middleware (`internal/api/v3/scope.go`)
 - [x] Bound `/tmp/repos` (eviction) — `internal/repocache`, wired into the git + browse paths, cap from `LOCAL_REPOS_MAX_BYTES`
 - [x] Add GitHub Actions: build + tests on PR — `.github/workflows/ci.yml` (runs against the Firestore emulator + frontend lint/build)
-- [ ] Prune stale local refs in `DownloadRepo` (or pin `max-instances=1`)
+- [x] Prune stale local refs in `DownloadRepo` — mirror-prune on lock-holding sync paths (`internal/gcs/gcs.go`); read paths stay merge-only
 - [ ] Rate limiter on auth-bearing endpoints
 - [ ] `recover()` in detached goroutines; deploy with CPU always allocated
 - [ ] Make `GITHUB_WEBHOOK_SECRET` mandatory; startup refusal on stray `DEV_MODE=true`

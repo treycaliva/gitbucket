@@ -231,7 +231,9 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 	if needsSync {
 		var downloaded bool
 		if h.StorageClient != nil && h.BucketName != "" {
-			downloaded, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+			// Locked write/sync path: prune so a branch deleted or force-rewound
+			// on another instance can't linger in this cache and resurrect.
+			downloaded, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot, true)
 			if err != nil {
 				http.Error(w, "Failed to download repository: "+err.Error(), http.StatusInternalServerError)
 				return

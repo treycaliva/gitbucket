@@ -256,9 +256,10 @@ func (h *APIHandler) GetPullRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if pr.Status == "open" {
-		// Sync repository first to get the latest refs from GCS
+		// Sync repository first to get the latest refs from GCS. Read-only PR
+		// view with no repo lock held, so merge only (no prune).
 		if h.StorageClient != nil && h.BucketName != "" {
-			_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+			_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot, false)
 			if err != nil {
 				http.Error(w, "Failed to sync repository from GCS: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -592,7 +593,7 @@ func (h *APIHandler) MergePullRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Download/sync repository again under the lock to ensure we have the absolute latest state
 	if h.StorageClient != nil && h.BucketName != "" {
-		_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+		_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot, true)
 		if err != nil {
 			http.Error(w, "Failed to sync repository from GCS: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -791,7 +792,7 @@ func (h *APIHandler) UpdatePullRequestBranch(w http.ResponseWriter, r *http.Requ
 
 	// Sync from GCS under the lock
 	if h.StorageClient != nil && h.BucketName != "" {
-		_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+		_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot, true)
 		if err != nil {
 			http.Error(w, "Failed to sync repository from GCS: "+err.Error(), http.StatusInternalServerError)
 			return

@@ -7,12 +7,18 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"cloud.google.com/go/storage"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
 )
+
+// syncTimestampFile is the local-only bookkeeping file the api package writes
+// inside each bare repo (see internal/api getLocalSyncTimestamp). It never
+// exists in GCS, so mirror-pruning must preserve it.
+const syncTimestampFile = "last_sync_timestamp"
 
 // NewClient initializes the Google Cloud Storage client.
 func NewClient(ctx context.Context) (*storage.Client, error) {
@@ -25,7 +31,15 @@ func NewClient(ctx context.Context) (*storage.Client, error) {
 
 // DownloadRepo downloads the repository files from GCS, comparing with local cache.
 // Returns true if downloaded successfully/exists, or false if the repository does not exist in GCS yet.
-func DownloadRepo(ctx context.Context, client *storage.Client, bucketName, owner, repo, localReposRoot string) (bool, error) {
+//
+// When prune is true, files present in the local cache but absent from GCS are
+// deleted so the local bare repo becomes an exact mirror of GCS. This matters
+// because GCS is the source of truth: without pruning, a ref (or loose object)
+// deleted or force-rewound on another instance lingers in a stale local cache
+// and can resurrect a deleted branch on the next push. Pruning mutates local
+// state, so callers MUST hold the per-repo lock; read-only paths (browse, PR
+// views) pass prune=false and keep the older merge-only behavior.
+func DownloadRepo(ctx context.Context, client *storage.Client, bucketName, owner, repo, localReposRoot string, prune bool) (bool, error) {
 	if client == nil {
 		return false, fmt.Errorf("storage client is nil")
 	}
@@ -37,6 +51,9 @@ func DownloadRepo(ctx context.Context, client *storage.Client, bucketName, owner
 
 	bucket := client.Bucket(bucketName)
 	it := bucket.Objects(ctx, &storage.Query{Prefix: prefix})
+
+	// Relative paths (local separator) of every file GCS holds for this repo.
+	keep := make(map[string]struct{})
 
 	var foundAny bool
 	for {
@@ -66,6 +83,8 @@ func DownloadRepo(ctx context.Context, client *storage.Client, bucketName, owner
 			}
 			continue
 		}
+
+		keep[filepath.FromSlash(relPath)] = struct{}{}
 
 		localInfo, err := os.Stat(localPath)
 		needsDownload := false
@@ -119,7 +138,78 @@ func DownloadRepo(ctx context.Context, client *storage.Client, bucketName, owner
 		}
 	}
 
+	// Only mirror-prune when GCS actually has this repo. If foundAny is false
+	// the repo doesn't exist in GCS yet (e.g. freshly initialized locally and
+	// not uploaded), and pruning would wipe a valid local repo.
+	if prune && foundAny {
+		if err := pruneToMirror(localRepoPath, keep); err != nil {
+			return foundAny, fmt.Errorf("failed to prune stale local files: %w", err)
+		}
+	}
+
 	return foundAny, nil
+}
+
+// pruneToMirror deletes files under localRepoPath whose relative paths are not
+// in keep, making the local tree an exact mirror of GCS. The local-only
+// last_sync_timestamp file and anything under lfs/ are preserved (neither is
+// synced to GCS), and directories left empty are removed. localRepoPath itself
+// is never removed.
+func pruneToMirror(localRepoPath string, keep map[string]struct{}) error {
+	lfsPrefix := "lfs" + string(os.PathSeparator)
+	var stale []string
+	err := filepath.Walk(localRepoPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(localRepoPath, path)
+		if err != nil {
+			return err
+		}
+		if rel == syncTimestampFile || strings.HasPrefix(rel, lfsPrefix) {
+			return nil
+		}
+		if _, ok := keep[rel]; !ok {
+			stale = append(stale, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, p := range stale {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	removeEmptyDirs(localRepoPath)
+	return nil
+}
+
+// removeEmptyDirs deletes directories left empty under root (deepest first),
+// never removing root itself. Best-effort: errors are ignored since a
+// non-empty or racing directory simply stays.
+func removeEmptyDirs(root string) {
+	var dirs []string
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() && path != root {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	// Deepest paths first so a parent becomes empty only after its children go.
+	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
+	for _, d := range dirs {
+		if entries, err := os.ReadDir(d); err == nil && len(entries) == 0 {
+			_ = os.Remove(d)
+		}
+	}
 }
 
 // UploadRepo walks the local bare repository and uploads new/modified files to GCS.

@@ -74,7 +74,7 @@ func TestGCSRepositoryOperations(t *testing.T) {
 	}
 
 	// 2. Download repository
-	downloaded, err := DownloadRepo(ctx, client, bucketName, owner, repo, localReposRoot)
+	downloaded, err := DownloadRepo(ctx, client, bucketName, owner, repo, localReposRoot, false)
 	if err != nil {
 		t.Fatalf("DownloadRepo failed: %v", err)
 	}
@@ -91,6 +91,33 @@ func TestGCSRepositoryOperations(t *testing.T) {
 		t.Errorf("downloaded content mismatch: expected %q, got %q", expectedContent, string(content))
 	}
 
+	// 2b. Prune: a ref that exists locally but not in GCS must be removed when
+	// downloading with prune=true (mirror semantics), while GCS-backed files and
+	// the local-only last_sync_timestamp survive.
+	staleRef := filepath.Join(localRepoPath, "refs", "heads", "stale")
+	if err := os.MkdirAll(filepath.Dir(staleRef), 0755); err != nil {
+		t.Fatalf("failed to create stale ref dir: %v", err)
+	}
+	if err := os.WriteFile(staleRef, []byte("deadbeef\n"), 0644); err != nil {
+		t.Fatalf("failed to write stale ref: %v", err)
+	}
+	tsFile := filepath.Join(localRepoPath, "last_sync_timestamp")
+	if err := os.WriteFile(tsFile, []byte("123\n"), 0644); err != nil {
+		t.Fatalf("failed to write timestamp file: %v", err)
+	}
+	if _, err := DownloadRepo(ctx, client, bucketName, owner, repo, localReposRoot, true); err != nil {
+		t.Fatalf("DownloadRepo(prune) failed: %v", err)
+	}
+	if _, err := os.Stat(staleRef); !os.IsNotExist(err) {
+		t.Error("expected stale local ref absent from GCS to be pruned")
+	}
+	if _, err := os.Stat(testFile); err != nil {
+		t.Error("expected GCS-backed HEAD to survive pruning")
+	}
+	if _, err := os.Stat(tsFile); err != nil {
+		t.Error("expected local-only last_sync_timestamp to survive pruning")
+	}
+
 	// 3. Delete repository
 	err = DeleteRepo(ctx, client, bucketName, owner, repo, localReposRoot)
 	if err != nil {
@@ -103,7 +130,7 @@ func TestGCSRepositoryOperations(t *testing.T) {
 	}
 
 	// Verify it's deleted from GCS
-	downloaded, err = DownloadRepo(ctx, client, bucketName, owner, repo, localReposRoot)
+	downloaded, err = DownloadRepo(ctx, client, bucketName, owner, repo, localReposRoot, false)
 	if err != nil {
 		t.Fatalf("DownloadRepo checking deletion failed: %v", err)
 	}

@@ -665,9 +665,10 @@ func (h *APIHandler) DeleteBranch(w http.ResponseWriter, r *http.Request) {
 	repoLower := strings.ToLower(repo)
 	localRepoPath := filepath.Join(h.LocalReposRoot, ownerLower, fmt.Sprintf("%s.git", repoLower))
 
-	// Sync local cache from GCS
+	// Sync local cache from GCS. Lock is held (acquired above), so prune to a
+	// clean mirror before mutating branches.
 	if h.StorageClient != nil && h.BucketName != "" {
-		_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+		_, err = gcs.DownloadRepo(r.Context(), h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot, true)
 		if err != nil {
 			http.Error(w, "Failed to sync repository from GCS: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -788,9 +789,10 @@ func (h *APIHandler) authorizeGitRead(w *http.ResponseWriter, r *http.Request, o
 		}
 	}
 
-	// Sync local cache
+	// Sync local cache. Read-only path with no repo lock held, so merge only —
+	// pruning here could race a concurrent push writing local refs.
 	if h.StorageClient != nil && h.BucketName != "" {
-		_, err = gcs.DownloadRepo(ctx, h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot)
+		_, err = gcs.DownloadRepo(ctx, h.StorageClient, h.BucketName, owner, repo, h.LocalReposRoot, false)
 		if err != nil {
 			log.Printf("[authorizeGitRead] Error downloading repo %s/%s from GCS: %v", owner, repo, err)
 			http.Error(*w, "Failed to download repository: "+err.Error(), http.StatusInternalServerError)
