@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds the application configuration.
@@ -13,12 +14,36 @@ type Config struct {
 	RestrictedIP         string
 	ProjectID            string
 	LocalReposRoot       string
+	LocalReposMaxBytes   int64 // eviction budget for materialized repos; 0 disables
 	KMSKeyName           string
 	SecretManagerProject string
 	// Plan 3: Cloud Tasks webhook engine.
 	CloudTasksQueueName    string // e.g. "projects/<p>/locations/us-central1/queues/gitbucket-webhooks"
 	DispatcherOIDCSA       string // service account email Cloud Tasks uses for OIDC
 	DispatcherOIDCAudience string // expected audience on inbound dispatcher requests
+}
+
+// localReposMaxBytes resolves the disk budget for materialized repos under
+// LOCAL_REPOS_ROOT. Explicit LOCAL_REPOS_MAX_BYTES wins (0 disables eviction).
+// Otherwise, since Cloud Run backs /tmp with tmpfs that counts against the
+// instance memory limit, default to half the cgroup v2 memory limit so the
+// working set can't OOM the instance; fall back to 2 GiB when the limit is
+// unknown or unbounded.
+func localReposMaxBytes() int64 {
+	if v := os.Getenv("LOCAL_REPOS_MAX_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
+		s := strings.TrimSpace(string(data))
+		if s != "max" {
+			if limit, err := strconv.ParseInt(s, 10, 64); err == nil && limit > 0 {
+				return limit / 2
+			}
+		}
+	}
+	return 2 << 30 // 2 GiB
 }
 
 // Load loads the configuration from environment variables.
@@ -67,6 +92,7 @@ func Load() *Config {
 		RestrictedIP:           restrictedIP,
 		ProjectID:              projectID,
 		LocalReposRoot:         localReposRoot,
+		LocalReposMaxBytes:     localReposMaxBytes(),
 		KMSKeyName:             kmsKeyName,
 		SecretManagerProject:   secretManagerProject,
 		CloudTasksQueueName:    os.Getenv("CLOUD_TASKS_QUEUE_NAME"),

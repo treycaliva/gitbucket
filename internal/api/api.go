@@ -26,6 +26,7 @@ import (
 	"gitbucket/internal/auth"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
+	"gitbucket/internal/repocache"
 	"gitbucket/internal/sync"
 )
 
@@ -40,7 +41,32 @@ type APIHandler struct {
 	LocalReposRoot  string
 	AuthHandler     *auth.AuthHandler
 	KMSClient       *sync.KMSClient
-	Events          apps.FireDeps // populated by main.go after construction
+	Events          apps.FireDeps      // populated by main.go after construction
+	RepoCache       *repocache.Manager // bounds LOCAL_REPOS_ROOT disk use; nil = unbounded
+}
+
+// evictRepos runs an LRU eviction sweep over the local repo cache, using the
+// per-repo Firestore lock to avoid deleting a repo mid-push on any instance.
+// Safe to call when RepoCache is nil or disabled. Uses a background context so
+// it isn't cancelled when the triggering request finishes.
+func (h *APIHandler) evictRepos() {
+	if !h.RepoCache.Enabled() {
+		return
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[repocache] eviction sweep panicked: %v", rec)
+		}
+	}()
+	h.RepoCache.Sweep(context.Background(), func(owner, repo string) (func(), bool) {
+		token, err := db.AcquireLock(context.Background(), h.FirestoreClient, owner, repo, 5*time.Minute, 0)
+		if err != nil {
+			return nil, false
+		}
+		return func() {
+			_ = db.ReleaseLock(context.Background(), h.FirestoreClient, owner, repo, token)
+		}, true
+	})
 }
 
 // NewAPIHandler creates a new APIHandler.
@@ -779,6 +805,11 @@ func (h *APIHandler) authorizeGitRead(w *http.ResponseWriter, r *http.Request, o
 		http.Error(*w, "Failed to initialize repository: "+err.Error(), http.StatusInternalServerError)
 		return nil, "", false
 	}
+
+	// Record access so a recently-browsed repo isn't the first thing evicted.
+	// Browse git subprocesses are short-lived, so the grace period (not a pin)
+	// is enough to keep them safe from an in-flight sweep.
+	h.RepoCache.Touch(owner, repo)
 
 	return meta, localRepoPath, true
 }

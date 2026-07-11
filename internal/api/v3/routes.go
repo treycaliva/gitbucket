@@ -28,14 +28,19 @@ func RegisterV3Routes(r chi.Router, h *V3Handler) {
 			})
 		})
 
-		// Real endpoints.
-		r.Get("/repos/{owner}/{repo}", h.GetRepo)
-		r.Get("/repos/{owner}/{repo}/contents/*", h.GetContents)
-		r.Get("/repos/{owner}/{repo}/git/ref/*", h.GetRef)
-		r.Get("/repos/{owner}/{repo}/git/trees/{sha}", h.GetTree)
-		r.Get("/repos/{owner}/{repo}/pulls", h.ListPulls)
-		r.Post("/repos/{owner}/{repo}/pulls", h.CreatePull)
-		r.Get("/repos/{owner}/{repo}/pulls/{number}", h.GetPull)
-		r.Patch("/repos/{owner}/{repo}/pulls/{number}", h.UpdatePull)
+		// Real endpoints. RequireRepoScope pins every {owner}/{repo} route to
+		// repositories the installation is actually installed on — permission
+		// scopes alone must never grant cross-account access.
+		r.Route("/repos/{owner}/{repo}", func(r chi.Router) {
+			r.Use(RequireRepoScope(h))
+			r.Get("/", h.GetRepo)
+			r.Get("/contents/*", h.GetContents)
+			r.Get("/git/ref/*", h.GetRef)
+			r.Get("/git/trees/{sha}", h.GetTree)
+			r.Get("/pulls", h.ListPulls)
+			r.Post("/pulls", h.CreatePull)
+			r.Get("/pulls/{number}", h.GetPull)
+			r.Patch("/pulls/{number}", h.UpdatePull)
+		})
 	})
 }

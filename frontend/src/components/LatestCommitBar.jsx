@@ -5,29 +5,28 @@ import { formatRelative } from '../utils/relativeTime';
 import { initials, colorFor } from '../utils/avatarColor';
 
 export default function LatestCommitBar({ owner, repo, branch, onViewCommits }) {
-  const [head, setHead] = useState(null);
-  const [error, setError] = useState('');
+  // Tag the loaded result with the branch it belongs to. Until a fetch for the
+  // current branch resolves, `loaded.branch !== branch`, so a branch switch
+  // hides the prior commit instead of flashing it — no reset-setState needed.
+  const [loaded, setLoaded] = useState({ branch: null, head: null });
 
   useEffect(() => {
     if (!branch) return;
     let cancelled = false;
-    // Reset so a branch switch clears the prior commit instead of flashing it.
-    setHead(null);
-    setError('');
     apiClient
       .get(`/api/repos/${owner}/${repo}/refs/${encodeURIComponent(branch)}/head`)
       .then((data) => {
-        if (!cancelled) setHead(data);
+        if (!cancelled) setLoaded({ branch, head: data });
       })
-      .catch((err) => {
-        if (!cancelled) setError(err.message || 'Failed to load latest commit');
+      .catch(() => {
+        if (!cancelled) setLoaded({ branch, head: null });
       });
     return () => {
       cancelled = true;
     };
   }, [owner, repo, branch]);
 
-  if (error) return null;
+  const head = loaded.branch === branch ? loaded.head : null;
   if (!head || !head.sha) return null;
 
   return (

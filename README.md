@@ -100,6 +100,7 @@ The multi-stage build compiles the React SPA and the Go binary into a single ima
 | `PROJECT_ID` / `GOOGLE_CLOUD_PROJECT` | `git-bucket-79382` | GCP project for Firestore + Firebase Admin |
 | `GCS_BUCKET` | — | Bucket holding Git objects and LFS blobs |
 | `LOCAL_REPOS_ROOT` | `/tmp/repos` | Scratch dir for `git-http-backend` working copies |
+| `LOCAL_REPOS_MAX_BYTES` | half the cgroup memory limit (else 2 GiB) | Disk budget for materialized repos; LRU-evicted above it. `0` disables eviction |
 | `DEV_MODE` | `false` | Enables `mock_<uid>` bearer tokens for the web UI |
 | `RESTRICTED_IP` | — | Comma-separated allowlist; loopback always passes |
 | `STORAGE_EMULATOR_HOST` | — | When set, GCS client runs unauthenticated against the emulator |

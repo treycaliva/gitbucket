@@ -91,7 +91,7 @@ func TestBrowseAPIs(t *testing.T) {
 		}
 	}
 
-	runGit("init")
+	runGit("init", "--initial-branch=main") // the assertions below assume "main" regardless of host init.defaultBranch
 	runGit("config", "user.name", "Test Author")
 	runGit("config", "user.email", "test@example.com")
 

@@ -30,6 +30,7 @@ import (
 	"gitbucket/internal/config"
 	"gitbucket/internal/db"
 	"gitbucket/internal/gcs"
+	"gitbucket/internal/repocache"
 	"gitbucket/internal/sync"
 )
 
@@ -256,6 +257,12 @@ func main() {
 	// API Routes
 	apiHandler := api.NewAPIHandler(firestoreClient, storageClient, cfg.GCSBucket, cfg.LocalReposRoot, authHandler, syncKMSClient)
 	apiHandler.Events = fireDeps
+	apiHandler.RepoCache = repocache.New(cfg.LocalReposRoot, cfg.LocalReposMaxBytes)
+	if apiHandler.RepoCache.Enabled() {
+		log.Printf("[repocache] local repo cache capped at %d bytes under %s", cfg.LocalReposMaxBytes, cfg.LocalReposRoot)
+	} else {
+		log.Printf("[repocache] eviction disabled (LOCAL_REPOS_MAX_BYTES=0); %s can grow unbounded", cfg.LocalReposRoot)
+	}
 	apiHandler.RegisterRoutes(r)
 
 	// GitHub App emulation routes (Plan 1: JWT-authed App endpoints only).

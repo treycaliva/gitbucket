@@ -139,6 +139,14 @@ func (h *APIHandler) HandleGitHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Git HTTP] Request: %s %s (isWrite: %v)", r.Method, r.URL.String(), isWrite)
 
+	// Pin the repo for the whole request so cache eviction never removes it out
+	// from under an in-flight clone/fetch/push, then run a sweep on the way out.
+	h.RepoCache.Pin(owner, repo)
+	defer func() {
+		h.RepoCache.Unpin(owner, repo)
+		go h.evictRepos()
+	}()
+
 	// 1. Fetch Repository Metadata
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
 	if err != nil {

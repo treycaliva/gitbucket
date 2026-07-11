@@ -306,7 +306,7 @@ export default function App() {
       case 'apps_install':
         return <SettingsAppsInstall slug={navigation.params.slug} onNavigate={navigate} />;
       case 'apps_list':
-        return <SettingsApps onNavigate={navigate} />;
+        return <SettingsApps />;
       case 'profile':
         return (
           <Profile user={user} username={navigation.params.username} onNavigate={navigate} />

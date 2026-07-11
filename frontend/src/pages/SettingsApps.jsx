@@ -3,7 +3,7 @@ import { apiClient } from '../apiClient';
 import { Boxes, Package, PackageCheck } from 'lucide-react';
 import Card from '../components/Card';
 
-export default function SettingsApps({ onNavigate }) {
+export default function SettingsApps() {
   const [owned, setOwned] = useState([]);
   const [installed, setInstalled] = useState([]);
 

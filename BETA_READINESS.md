@@ -2,6 +2,8 @@
 
 *Assessed 2026-07-11 against `main` (b12088e). Verdict: **close, but not ready yet** — the product surface is beta-quality, but there are 3 blockers (one security, two operational) and a handful of should-fixes that are cheap relative to the risk they remove.*
 
+> **Update (branch `claude/beta-readiness-landing-page-n54yuj`):** all three blockers below have been addressed on this branch — v3 repo-scoping middleware (§Blocker 1), a GitHub Actions CI workflow that runs build + tests against the Firestore emulator (§Blocker 3), and LRU eviction that bounds `LOCAL_REPOS_ROOT` (§Blocker 2). The should-fixes and product gaps still stand. See the checklist at the bottom for current state.
+
 ## Overall verdict
 
 The core product — Git over Smart HTTP, pull requests with reviews, branch protection with CODEOWNERS, LFS, CI statuses, collaborators, 2FA — is genuinely feature-complete and beyond typical MVP scope. Auth fundamentals are sound: PATs are stored as SHA-256 hashes of 160-bit random tokens, Firebase verification is correct, and every core web/git/LFS write path enforces ownership. `go build ./...` and `go test ./internal/...` pass cleanly (62 test files, ~0.69 test:source ratio).
@@ -69,9 +71,9 @@ There is no `.github/` directory — nothing runs `go build`, `go test`, lint, o
 
 ## Suggested launch checklist
 
-- [ ] Scope-check `/api/v3/*` against the installation account (or gate the surface off)
-- [ ] Bound `/tmp/repos` (eviction) — or accept `max-instances=1` for the beta
-- [ ] Add GitHub Actions: build + unit tests on PR (E2E as a follow-up)
+- [x] Scope-check `/api/v3/*` against the installation account — `RequireRepoScope` middleware (`internal/api/v3/scope.go`)
+- [x] Bound `/tmp/repos` (eviction) — `internal/repocache`, wired into the git + browse paths, cap from `LOCAL_REPOS_MAX_BYTES`
+- [x] Add GitHub Actions: build + tests on PR — `.github/workflows/ci.yml` (runs against the Firestore emulator + frontend lint/build)
 - [ ] Prune stale local refs in `DownloadRepo` (or pin `max-instances=1`)
 - [ ] Rate limiter on auth-bearing endpoints
 - [ ] `recover()` in detached goroutines; deploy with CPU always allocated

@@ -210,7 +210,7 @@ export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
             <div style={{ color: 'var(--gb-err)', display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '1rem 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <AlertCircle size={16} />
-                <span>Failed to fetch live build logs.</span>
+                <span>{error || 'Failed to fetch live build logs.'}</span>
               </div>
               {signedUrl ? (
                 <span style={{ color: 'var(--gb-fg-3)' }}>
