@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -48,6 +49,8 @@ func TestDispatcher_RelaysAndMarksDelivered(t *testing.T) {
 	})
 
 	dh := NewDispatcherHandler(fs, "" /* no OIDC audience in tests */)
+	// Override the safe client in tests to allow local deliveries to httptest servers.
+	dh.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	r := chi.NewRouter()
 	r.Post("/_internal/dispatch-webhook/{id}", dh.Dispatch)
 
@@ -110,6 +113,8 @@ func TestDispatcher_5xxReturnsNon2xxForRetry(t *testing.T) {
 	})
 
 	dh := NewDispatcherHandler(fs, "")
+	// Override the safe client in tests to allow local deliveries to httptest servers.
+	dh.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	r := chi.NewRouter()
 	r.Post("/_internal/dispatch-webhook/{id}", dh.Dispatch)
 

@@ -2,13 +2,46 @@ package apps
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/go-chi/chi/v5"
 )
+
+// SafeHTTPClient returns an http.Client that prevents Server-Side Request Forgery (SSRF)
+// by validating that the resolved IP address is not a loopback, private, or link-local address.
+func SafeHTTPClient() *http.Client {
+	dialer := &net.Dialer{
+		Timeout: 30 * time.Second,
+		Control: func(network, address string, c syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return fmt.Errorf("SSRF protection: unable to parse IP from address %s", host)
+			}
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				return fmt.Errorf("SSRF protection: access to IP %s is not allowed", ip.String())
+			}
+			return nil
+		},
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = dialer.DialContext
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+}
 
 // DispatcherHandler relays Cloud Tasks-delivered webhooks to App receivers.
 // Mounted at /_internal/dispatch-webhook/{id}.
@@ -22,7 +55,7 @@ func NewDispatcherHandler(fs *firestore.Client, oidcAudience string) *Dispatcher
 	return &DispatcherHandler{
 		FS:           fs,
 		OIDCAudience: oidcAudience,
-		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
+		HTTPClient:   SafeHTTPClient(),
 	}
 }
 

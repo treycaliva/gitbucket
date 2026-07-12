@@ -88,6 +88,8 @@ func TestPlan3WebhookFlow(t *testing.T) {
 	v3.RegisterV3Routes(r, v3H)
 
 	dispatcher := apps.NewDispatcherHandler(fs, "")
+	// Override the safe client in tests to allow local deliveries to httptest servers.
+	dispatcher.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	r.Post("/_internal/dispatch-webhook/{id}", dispatcher.Dispatch)
 
 	// Mint installation token.

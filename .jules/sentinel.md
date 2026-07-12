@@ -7,3 +7,8 @@
 - Dynamic `Origin` echoing combined with `Access-Control-Allow-Credentials: true` allows any site to perform authenticated cross-origin requests, leading to potential data leakage.
 - For APIs that do not rely on cookies (like GitBucket, which uses `Authorization` bearer tokens), it is safer to use `Access-Control-Allow-Origin: *` and completely omit the `Access-Control-Allow-Credentials` header.
 - This neutralizes cross-origin attacks where malicious sites might trick a user's browser into sending authenticated requests.
+
+## 2026-05-24 - SSRF Vulnerability in Webhook Dispatcher
+**Vulnerability:** The application was using the default `http.Client` to dispatch webhooks to user-provided URLs (`TargetURL`). This allowed users to point webhooks at internal IPs (e.g., `127.0.0.1`, private subnets, cloud metadata endpoints), resulting in Server-Side Request Forgery (SSRF) and potential DNS rebinding attacks.
+**Learning:** Default HTTP clients in Go follow redirects and resolve DNS without restriction. Any outbound HTTP request to a user-provided URL must be strictly controlled to prevent accessing internal resources. Also, when parsing IP addresses, it is critical to fail closed if `net.ParseIP` returns `nil` (e.g., for IPv6 with zone index).
+**Prevention:** Always use a custom `http.Client` with an SSRF-safe `net.Dialer`. The dialer's `Control` hook should inspect the resolved IP address and reject connections to loopback, private, and link-local ranges. Furthermore, use `http.DefaultTransport.(*http.Transport).Clone()` when creating custom transports to avoid dropping important defaults like proxy settings and HTTP/2 support.
