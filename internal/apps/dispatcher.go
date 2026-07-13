@@ -2,8 +2,11 @@ package apps
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -19,10 +22,44 @@ type DispatcherHandler struct {
 }
 
 func NewDispatcherHandler(fs *firestore.Client, oidcAudience string) *DispatcherHandler {
+	// Sentinel: Create an SSRF-safe HTTP client by cloning the DefaultTransport
+	// and injecting a custom Dialer. The Control hook ensures that resolved IPs
+	// do not point to internal/private network boundaries (loopback, private, link-local).
+	var transport http.RoundTripper
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		cloned := t.Clone()
+		dialer := &net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Control: func(network, address string, c syscall.RawConn) error {
+				host, _, err := net.SplitHostPort(address)
+				if err != nil {
+					return err
+				}
+				ip := net.ParseIP(host)
+				if ip == nil {
+					return errors.New("ssrf prevention: failed to parse IP")
+				}
+				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+					return errors.New("ssrf prevention: forbidden IP")
+				}
+				return nil
+			},
+		}
+		cloned.DialContext = dialer.DialContext
+		transport = cloned
+	} else {
+		// Fallback for tests if DefaultTransport isn't a *http.Transport.
+		transport = http.DefaultTransport
+	}
+
 	return &DispatcherHandler{
 		FS:           fs,
 		OIDCAudience: oidcAudience,
-		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 
