@@ -2,8 +2,11 @@ package apps
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -19,10 +22,37 @@ type DispatcherHandler struct {
 }
 
 func NewDispatcherHandler(fs *firestore.Client, oidcAudience string) *DispatcherHandler {
+	// Security: Use a custom Dialer to prevent Server-Side Request Forgery (SSRF)
+	// by validating the resolved IPs before the connection is established.
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control: func(network, address string, c syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return errors.New("SSRF protection: failed to parse IP")
+			}
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+				return errors.New("SSRF protection: blocked private/local IP")
+			}
+			return nil
+		},
+	}
+
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = dialer.DialContext
+
 	return &DispatcherHandler{
 		FS:           fs,
 		OIDCAudience: oidcAudience,
-		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: tr,
+		},
 	}
 }
 

@@ -7,3 +7,8 @@
 - Dynamic `Origin` echoing combined with `Access-Control-Allow-Credentials: true` allows any site to perform authenticated cross-origin requests, leading to potential data leakage.
 - For APIs that do not rely on cookies (like GitBucket, which uses `Authorization` bearer tokens), it is safer to use `Access-Control-Allow-Origin: *` and completely omit the `Access-Control-Allow-Credentials` header.
 - This neutralizes cross-origin attacks where malicious sites might trick a user's browser into sending authenticated requests.
+
+## 2026-05-24 - SSRF via Outbound Webhook Relay
+**Vulnerability:** The webhook dispatcher used `http.Client` without enforcing IP validation on resolved hostnames, leaving it vulnerable to Server-Side Request Forgery (SSRF). Attackers could have supplied webhooks pointing to internal network IP addresses (like `169.254.169.254` for cloud metadata) or used DNS rebinding.
+**Learning:** Using default HTTP clients for user-supplied URLs is dangerous, as standard DNS resolution does not block private or local loopback addresses. Go's `net.Dialer.Control` hook allows for inspecting the exact IP resolved right before the connection is established. This ensures that any Time-Of-Check to Time-Of-Use (TOCTOU) issues via DNS rebinding are inherently blocked. Also, remember that `0.0.0.0` or `::` (unspecified IP) routes to localhost on Linux and must be blocked.
+**Prevention:** For any HTTP client that accesses external or user-provided URLs, override the transport's `DialContext` with a custom `net.Dialer`. Implement a `Control` hook that parses the resolved IP and blocks it if it matches loopback, private, link-local, or unspecified ranges, and fail closed if the IP is unparseable.
