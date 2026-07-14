@@ -177,18 +177,30 @@ export default function Dashboard({ user, onNavigate }) {
           r.owner.toLowerCase().includes(q) ||
           (r.description || '').toLowerCase().includes(q))
     );
-    const prCount = (r) => {
-      const n = openPRCount[slugOf(r)];
-      return typeof n === 'number' ? n : 0;
-    };
+
+    // ⚡ Bolt optimization: Use Schwartzian transform (decorate-sort-undecorate)
+    // Avoids executing expensive string concatenations (slugOf) and parsing (Date.parse in tsOf)
+    // inside the sort comparator O(N log N) times. Now evaluated exactly once per item O(N).
+    let decorated = rows.map((r) => {
+      const slug = slugOf(r);
+      const c = openPRCount[slug];
+      return {
+        r,
+        ts: sort === 'updated' ? tsOf(r) : 0,
+        name: sort.startsWith('name') ? r.name : '',
+        prCount: typeof c === 'number' ? c : 0,
+      };
+    });
+
     switch (sort) {
-      case 'updated':   rows = rows.toSorted((a, b) => tsOf(b) - tsOf(a)); break;
-      case 'name-asc':  rows = rows.toSorted((a, b) => a.name.localeCompare(b.name)); break;
-      case 'name-desc': rows = rows.toSorted((a, b) => b.name.localeCompare(a.name)); break;
-      case 'open-prs':  rows = rows.toSorted((a, b) => prCount(b) - prCount(a)); break;
+      case 'updated':   decorated.sort((a, b) => b.ts - a.ts); break;
+      case 'name-asc':  decorated.sort((a, b) => a.name.localeCompare(b.name)); break;
+      case 'name-desc': decorated.sort((a, b) => b.name.localeCompare(a.name)); break;
+      case 'open-prs':  decorated.sort((a, b) => b.prCount - a.prCount); break;
       default: break;
     }
-    return rows;
+
+    return decorated.map(d => d.r);
   }, [repos, search, typeFilter, sort, openPRCount]);
 
   const handleCreateRepo = async (e) => {
