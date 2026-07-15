@@ -130,3 +130,43 @@ func TestDispatcher_5xxReturnsNon2xxForRetry(t *testing.T) {
 		t.Errorf("Attempts = %d", got.Attempts)
 	}
 }
+
+func TestDispatcher_SSRFPrevention(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx := context.Background()
+	fs, _ := db.NewClient(ctx, "git-bucket-79382")
+	defer fs.Close()
+
+	// Start a local server we SHOULD NOT be able to reach.
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer app.Close()
+
+	// The httptest server listens on 127.0.0.1 (a loopback address).
+	deliv, _ := CreateDelivery(ctx, fs, CreateDeliveryInput{
+		AppID: "app-ssrf", InstallationID: "inst-ssrf", Event: "push",
+		TargetURL: app.URL, PayloadSHA256: "x",
+	})
+	t.Cleanup(func() {
+		_, _ = fs.Collection(CollectionWebhookDeliveries).Doc(deliv.DeliveryID).Delete(context.Background())
+	})
+
+	dh := NewDispatcherHandler(fs, "")
+	r := chi.NewRouter()
+	r.Post("/_internal/dispatch-webhook/{id}", dh.Dispatch)
+
+	req := httptest.NewRequest("POST", "/_internal/dispatch-webhook/"+deliv.DeliveryID, strings.NewReader(`{}`))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	// We expect the dispatcher to fail with a bad gateway because the dialer rejects the loopback IP.
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("dispatcher returned %d, expected 502 Bad Gateway for SSRF attempt", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "SSRF prevented") {
+		t.Errorf("expected SSRF error message in response body, got: %q", rr.Body.String())
+	}
+}

@@ -2,8 +2,11 @@ package apps
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -19,10 +22,35 @@ type DispatcherHandler struct {
 }
 
 func NewDispatcherHandler(fs *firestore.Client, oidcAudience string) *DispatcherHandler {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control: func(network, address string, c syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return errors.New("invalid IP address format")
+			}
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+				return errors.New("SSRF prevented: access to internal IP denied")
+			}
+			return nil
+		},
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = dialer.DialContext
+
 	return &DispatcherHandler{
 		FS:           fs,
 		OIDCAudience: oidcAudience,
-		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 
