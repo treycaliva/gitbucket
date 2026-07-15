@@ -181,13 +181,23 @@ export default function Dashboard({ user, onNavigate }) {
       const n = openPRCount[slugOf(r)];
       return typeof n === 'number' ? n : 0;
     };
-    switch (sort) {
-      case 'updated':   rows = rows.toSorted((a, b) => tsOf(b) - tsOf(a)); break;
-      case 'name-asc':  rows = rows.toSorted((a, b) => a.name.localeCompare(b.name)); break;
-      case 'name-desc': rows = rows.toSorted((a, b) => b.name.localeCompare(a.name)); break;
-      case 'open-prs':  rows = rows.toSorted((a, b) => prCount(b) - prCount(a)); break;
-      default: break;
+
+    // ⚡ Bolt optimization: Use Schwartzian transform (decorate-sort-undecorate)
+    // to avoid O(N log N) re-evaluations of expensive keys (e.g. Date.parse in tsOf).
+    if (sort === 'updated') {
+      return rows.map(r => ({ r, key: tsOf(r) }))
+                 .sort((a, b) => b.key - a.key)
+                 .map(item => item.r);
+    } else if (sort === 'open-prs') {
+      return rows.map(r => ({ r, key: prCount(r) }))
+                 .sort((a, b) => b.key - a.key)
+                 .map(item => item.r);
+    } else if (sort === 'name-asc') {
+      return rows.toSorted((a, b) => a.name.localeCompare(b.name));
+    } else if (sort === 'name-desc') {
+      return rows.toSorted((a, b) => b.name.localeCompare(a.name));
     }
+
     return rows;
   }, [repos, search, typeFilter, sort, openPRCount]);
 
