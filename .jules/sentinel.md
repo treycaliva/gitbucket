@@ -7,3 +7,8 @@
 - Dynamic `Origin` echoing combined with `Access-Control-Allow-Credentials: true` allows any site to perform authenticated cross-origin requests, leading to potential data leakage.
 - For APIs that do not rely on cookies (like GitBucket, which uses `Authorization` bearer tokens), it is safer to use `Access-Control-Allow-Origin: *` and completely omit the `Access-Control-Allow-Credentials` header.
 - This neutralizes cross-origin attacks where malicious sites might trick a user's browser into sending authenticated requests.
+
+## 2026-06-15 - SSRF Vulnerability in Webhook Dispatcher
+**Vulnerability:** The application was using the default `http.Client` for delivering outbound webhooks to user-provided URLs in `internal/apps/dispatcher.go`. This exposed the server to Server-Side Request Forgery (SSRF) and DNS rebinding attacks, allowing users to send arbitrary HTTP requests to internal IP addresses (e.g., `127.0.0.1`, `169.254.169.254`).
+**Learning:** Default HTTP clients implicitly trust any resolved IP address, and simply validating the URL string beforehand is insufficient due to DNS rebinding.
+**Prevention:** Use a custom `http.Client` with a modified `net.Dialer` whose `Control` hook uses `net.ParseIP` to explicitly check the resolved IP against loopback, private, link-local, and unspecified ranges (and strictly checking `ip == nil`) before establishing the connection. Also ensure local `httptest` servers correctly override this strict client with a standard one in unit tests.
