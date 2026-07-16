@@ -53,12 +53,14 @@ function globMatch(pattern, value) {
 function getMatchingRule(rules, targetBranch) {
   if (!Array.isArray(rules) || !targetBranch) return null;
   const wildcardCount = (p) => [...p].filter((c) => c === '*' || c === '?').length;
-  const sorted = [...rules].sort((a, b) => {
-    const wa = wildcardCount(a.pattern), wb = wildcardCount(b.pattern);
-    if (wa !== wb) return wa - wb;                       // fewer wildcards = more specific
-    if (a.pattern.length !== b.pattern.length) return b.pattern.length - a.pattern.length; // longer = more specific
-    return a.pattern < b.pattern ? -1 : 1;              // lexicographic tiebreak
+  // ⚡ Bolt: Schwartzian transform to precompute wildcardCount (O(N) instead of O(N log N)).
+  const decorated = rules.map(r => ({ r, wc: wildcardCount(r.pattern), len: r.pattern.length }));
+  decorated.sort((a, b) => {
+    if (a.wc !== b.wc) return a.wc - b.wc;                       // fewer wildcards = more specific
+    if (a.len !== b.len) return b.len - a.len;                   // longer = more specific
+    return a.r.pattern < b.r.pattern ? -1 : 1;                   // lexicographic tiebreak
   });
+  const sorted = decorated.map(d => d.r);
   return sorted.find((r) => globMatch(r.pattern, targetBranch)) || null;
 }
 function buildReviewerList(requestedReviewers, reviews) {
