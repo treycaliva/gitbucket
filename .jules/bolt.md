@@ -13,3 +13,7 @@
 ## 2024-03-08 - Concurrent Firestore Chunk Queries
 **Learning:** Firestore `in` queries are limited to 30 elements, forcing sequential queries for large datasets which causes significant network latency. Go 1.25 handles loop variable captures cleanly, making closure usage safer than previous versions.
 **Action:** When querying large batches in Firestore, use `golang.org/x/sync/errgroup` with a concurrency limit (e.g., `g.SetLimit(10)`) to concurrently execute chunked queries. Move document parsing outside of mutex locks to reduce lock contention and maximize parallel throughput.
+
+## 2025-02-18 - Avoid re-renders from effects and optimize large list sorting
+**Learning:** Found two cascading re-render patterns where `useEffect` was setting state synchronously on mount (`SettingsAppsNew.jsx`) and prop change (`LatestCommitBar.jsx`). Also found O(N log N) sorting loops in the dashboard re-evaluating date strings and object lookups.
+**Action:** When component props change, derive state directly in the render function (or use lazy initializers for mount). When sorting arrays with expensive key evaluations, implement the Schwartzian transform (decorate-sort-undecorate) to achieve O(N) evaluation time.
