@@ -12,16 +12,16 @@ export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
   const logEndRef = useRef(null);
   const wsRef = useRef(null);
 
-  const fetchSignedUrl = async () => {
-    try {
-      const data = await apiClient.get(`/api/repos/${owner}/${repo}/builds/${buildId}/logs`);
-      setSignedUrl(data.signedUrl);
-    } catch (err) {
-      console.error("Failed to fetch GCS log signed URL:", err);
-    }
-  };
-
   useEffect(() => {
+    const fetchSignedUrl = async () => {
+      try {
+        const data = await apiClient.get(`/api/repos/${owner}/${repo}/builds/${buildId}/logs`);
+        setSignedUrl(data.signedUrl);
+      } catch (err) {
+        console.error("Failed to fetch GCS log signed URL:", err);
+      }
+    };
+
     let active = true;
 
     const connectLogsStream = async () => {
