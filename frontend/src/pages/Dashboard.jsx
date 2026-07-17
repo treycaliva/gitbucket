@@ -182,10 +182,27 @@ export default function Dashboard({ user, onNavigate }) {
       return typeof n === 'number' ? n : 0;
     };
     switch (sort) {
-      case 'updated':   rows = rows.toSorted((a, b) => tsOf(b) - tsOf(a)); break;
-      case 'name-asc':  rows = rows.toSorted((a, b) => a.name.localeCompare(b.name)); break;
-      case 'name-desc': rows = rows.toSorted((a, b) => b.name.localeCompare(a.name)); break;
-      case 'open-prs':  rows = rows.toSorted((a, b) => prCount(b) - prCount(a)); break;
+      case 'updated': {
+        // ⚡ Bolt: Schwartzian transform (decorate-sort-undecorate) to precompute tsOf(r).
+        // Avoids O(N log N) evaluations of Date.parse(), improving sort performance.
+        const decorated = rows.map(r => ({ r, v: tsOf(r) }));
+        decorated.sort((a, b) => b.v - a.v);
+        rows = decorated.map(d => d.r);
+        break;
+      }
+      case 'name-asc':
+        rows = rows.toSorted((a, b) => a.name.localeCompare(b.name));
+        break;
+      case 'name-desc':
+        rows = rows.toSorted((a, b) => b.name.localeCompare(a.name));
+        break;
+      case 'open-prs': {
+        // ⚡ Bolt: Precompute prCount(r) (which calls slugOf) prior to sort comparison.
+        const decorated = rows.map(r => ({ r, v: prCount(r) }));
+        decorated.sort((a, b) => b.v - a.v);
+        rows = decorated.map(d => d.r);
+        break;
+      }
       default: break;
     }
     return rows;
