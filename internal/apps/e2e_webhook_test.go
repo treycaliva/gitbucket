@@ -88,6 +88,7 @@ func TestPlan3WebhookFlow(t *testing.T) {
 	v3.RegisterV3Routes(r, v3H)
 
 	dispatcher := apps.NewDispatcherHandler(fs, "")
+	dispatcher.HTTPClient = &http.Client{} // bypass SSRF protection for local httptest server
 	r.Post("/_internal/dispatch-webhook/{id}", dispatcher.Dispatch)
 
 	// Mint installation token.

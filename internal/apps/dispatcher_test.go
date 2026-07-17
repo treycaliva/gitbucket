@@ -48,6 +48,7 @@ func TestDispatcher_RelaysAndMarksDelivered(t *testing.T) {
 	})
 
 	dh := NewDispatcherHandler(fs, "" /* no OIDC audience in tests */)
+	dh.HTTPClient = &http.Client{} // bypass SSRF protection for local httptest server
 	r := chi.NewRouter()
 	r.Post("/_internal/dispatch-webhook/{id}", dh.Dispatch)
 
@@ -110,6 +111,7 @@ func TestDispatcher_5xxReturnsNon2xxForRetry(t *testing.T) {
 	})
 
 	dh := NewDispatcherHandler(fs, "")
+	dh.HTTPClient = &http.Client{} // bypass SSRF protection for local httptest server
 	r := chi.NewRouter()
 	r.Post("/_internal/dispatch-webhook/{id}", dh.Dispatch)
 
