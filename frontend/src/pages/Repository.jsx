@@ -2304,14 +2304,14 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     }));
   };
 
-  const toggleFileCollapse = (path) => {
+  const toggleFileCollapse = React.useCallback((path) => {
     setCollapsedFiles(prev => ({
       ...prev,
       [path]: !prev[path]
     }));
-  };
+  }, []);
 
-  const toggleViewed = (path) => {
+  const toggleViewed = React.useCallback((path) => {
     setViewedFiles(prev => {
       const next = { ...prev, [path]: !prev[path] };
       if (next[path]) {
@@ -2321,7 +2321,7 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
       }
       return next;
     });
-  };
+  }, []);
 
   const scrollToFile = (path) => {
     setActiveFile(path);
@@ -3091,70 +3091,19 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
                 const isHighlight = activeHighlight === file.path;
 
                 return (
-                  <div
+                  <DiffFileCard
                     key={file.path}
-                    id={`diff-file-${file.path}`}
-                    className={`diff-file-card ${isViewed ? 'viewed' : ''} ${isHighlight ? 'scroll-highlight' : ''}`}
-                  >
-                    <div className="diff-file-card-header">
-                      <div
-                        className="diff-file-card-header-left"
-                        onClick={() => toggleFileCollapse(file.path)}
-                      >
-                        <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-                          {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-                        </span>
-                        <span className="diff-file-card-path">{file.path}</span>
-                        <span className="diff-file-card-stats">
-                          {file.additions > 0 && <span style={{ color: 'var(--success)' }}>+{file.additions}</span>}
-                          {file.deletions > 0 && <span style={{ color: 'var(--error)' }}>-{file.deletions}</span>}
-                        </span>
-                      </div>
-                      <div className="diff-file-card-header-right">
-                        <button
-                          className="diff-file-card-action-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onNavigate('blob', { owner, repo, branch: pr.sourceBranch || 'main', path: file.path });
-                          }}
-                        >
-                          View file
-                        </button>
-                        <label className={`diff-viewed-label ${isViewed ? 'checked' : ''}`} onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={isViewed}
-                            onChange={() => toggleViewed(file.path)}
-                          />
-                          Viewed
-                        </label>
-                      </div>
-                    </div>
-
-                    {!isCollapsed && (
-                      <div className="diff-file-card-body">
-                        {file.lines.length === 0 ? (
-                          <div style={{ padding: '1.5rem', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center' }}>
-                            No line changes (e.g. empty or binary file).
-                          </div>
-                        ) : (
-                          file.lines.map((line, idx) => (
-                            <div key={idx} className={`diff-line-row diff-row-${line.type}`}>
-                              <div className="diff-line-gutter diff-line-gutter-old">
-                                {line.oldLineNum !== null ? line.oldLineNum : ''}
-                              </div>
-                              <div className="diff-line-gutter diff-line-gutter-new">
-                                {line.newLineNum !== null ? line.newLineNum : ''}
-                              </div>
-                              <div className="diff-line-code">
-                                {line.content}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
+                    file={file}
+                    isViewed={isViewed}
+                    isCollapsed={isCollapsed}
+                    isHighlight={isHighlight}
+                    owner={owner}
+                    repo={repo}
+                    branch={pr.sourceBranch || 'main'}
+                    onNavigate={onNavigate}
+                    toggleFileCollapse={toggleFileCollapse}
+                    toggleViewed={toggleViewed}
+                  />
                 );
               })
             )}
@@ -3164,6 +3113,99 @@ function PullRequestDetail({ owner, repo, prNumber, meta, onNavigate, user }) {
     </div>
   );
 }
+
+
+// ⚡ Bolt: React.memo prevents O(N) diff components from deep re-rendering when a single
+// file's viewed state is toggled. Custom equality check ensures only relevant props are compared.
+const DiffFileCard = React.memo(
+  ({
+    file,
+    isViewed,
+    isCollapsed,
+    isHighlight,
+    owner,
+    repo,
+    branch,
+    onNavigate,
+    toggleFileCollapse,
+    toggleViewed,
+  }) => {
+    return (
+      <div
+        id={`diff-file-${file.path}`}
+        className={`diff-file-card ${isViewed ? 'viewed' : ''} ${isHighlight ? 'scroll-highlight' : ''}`}
+      >
+        <div className="diff-file-card-header">
+          <div
+            className="diff-file-card-header-left"
+            onClick={() => toggleFileCollapse(file.path)}
+          >
+            <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+              {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+            </span>
+            <span className="diff-file-card-path">{file.path}</span>
+            <span className="diff-file-card-stats">
+              {file.additions > 0 && <span style={{ color: 'var(--success)' }}>+{file.additions}</span>}
+              {file.deletions > 0 && <span style={{ color: 'var(--error)' }}>-{file.deletions}</span>}
+            </span>
+          </div>
+          <div className="diff-file-card-header-right">
+            <button
+              className="diff-file-card-action-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate('blob', { owner, repo, branch, path: file.path });
+              }}
+            >
+              View file
+            </button>
+            <label className={`diff-viewed-label ${isViewed ? 'checked' : ''}`} onClick={(e) => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                checked={isViewed}
+                onChange={() => toggleViewed(file.path)}
+              />
+              Viewed
+            </label>
+          </div>
+        </div>
+
+        {!isCollapsed && (
+          <div className="diff-file-card-body">
+            {file.lines.length === 0 ? (
+              <div style={{ padding: '1.5rem', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', textAlign: 'center' }}>
+                No line changes (e.g. empty or binary file).
+              </div>
+            ) : (
+              file.lines.map((line, idx) => (
+                <div key={idx} className={`diff-line-row diff-row-${line.type}`}>
+                  <div className="diff-line-gutter diff-line-gutter-old">
+                    {line.oldLineNum !== null ? line.oldLineNum : ''}
+                  </div>
+                  <div className="diff-line-gutter diff-line-gutter-new">
+                    {line.newLineNum !== null ? line.newLineNum : ''}
+                  </div>
+                  <div className="diff-line-code">
+                    {line.content}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.isViewed === nextProps.isViewed &&
+      prevProps.isCollapsed === nextProps.isCollapsed &&
+      prevProps.isHighlight === nextProps.isHighlight &&
+      prevProps.branch === nextProps.branch &&
+      prevProps.file === nextProps.file
+    );
+  }
+);
 
 // Client-side diff parsing and tree building helpers
 const parseDiff = (rawDiff) => {
