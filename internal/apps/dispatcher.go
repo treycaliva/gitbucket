@@ -6,11 +6,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"syscall"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/go-chi/chi/v5"
+	"google.golang.org/api/idtoken"
 )
 
 // DispatcherHandler relays Cloud Tasks-delivered webhooks to App receivers.
@@ -139,18 +141,14 @@ func (d *DispatcherHandler) Dispatch(w http.ResponseWriter, r *http.Request) {
 }
 
 // verifyOIDCAudience checks Cloud Tasks' Authorization: Bearer <jwt> header
-// against the expected audience claim. For Plan 3 we implement a minimal
-// check that delegates to golang-jwt/jwt with Google's public keys.
-//
-// FUTURE: use Google's identitytoolkit/v1 verifyIdToken or the standard
-// `google.golang.org/api/idtoken` package for production-grade verification.
-// For Plan 3 MVP this is a no-op that always returns true if no audience
-// is configured (callers gate via `if d.OIDCAudience != ""`).
-//
-// Until the real verification lands, configuring OIDCAudience in production
-// MUST be paired with network-level protection (Cloud Run ingress = internal
-// only, with proper IAM on the queue).
-func verifyOIDCAudience(_ *http.Request, _ string) bool {
-	// Intentionally permissive in Plan 3. Tighten in a follow-on.
-	return true
+// against the expected audience claim.
+func verifyOIDCAudience(r *http.Request, expectedAudience string) bool {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		return false
+	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+
+	_, err := idtoken.Validate(r.Context(), token, expectedAudience)
+	return err == nil
 }
