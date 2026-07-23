@@ -16,3 +16,7 @@
 ## 2025-02-18 - Optimize React sorting with Schwartzian transforms
 **Learning:** Found O(N log N) bottlenecks when rendering sorted lists (like the repository list in Dashboard or branch protection rules in Repository) because expensive sorting keys were being re-calculated on every comparison. The sorting callbacks did string manipulations, looping, or `Date.parse()` evaluations every time they compared elements.
 **Action:** Use the Schwartzian transform (decorate-sort-undecorate) pattern to optimize sorting in Javascript whenever the sort key computation is expensive. Map the array to objects that hold the original element and the pre-computed sort keys, sort the mapped array, and map back to the original element list.
+
+## 2025-02-18 - Extract complex list items into memoized components to avoid cascading O(N) re-renders
+**Learning:** Found massive UI lag on Pull Request Detail pages when viewing large diffs. Interacting with a single file (like toggling collapse or viewed status) would update a state variable in the main \`PullRequestDetail\` component, triggering a cascading O(N) re-render of thousands of diff lines for *all* files. Inline \`.map()\` rendering for complex DOM trees kills React performance.
+**Action:** Extract expensive list items (like \`DiffFileCard\`) into separate components, wrap them in \`React.memo\`, and pass stable \`React.useCallback\` functions for state updates to prevent unaffected elements from re-rendering.
