@@ -3341,19 +3341,13 @@ const buildFileTree = (files) => {
       if (isLast) {
         child.additions = file.additions;
         child.deletions = file.deletions;
+      } else {
+        // Pre-aggregate additions and deletions on parent directories to avoid recursive calculateTreeStats
+        child.additions += file.additions;
+        child.deletions += file.deletions;
       }
     });
   });
-
-  const calculateTreeStats = (nodes) => {
-    nodes.forEach(node => {
-      if (node.isDirectory) {
-        calculateTreeStats(node.children);
-        node.additions = node.children.reduce((sum, child) => sum + child.additions, 0);
-        node.deletions = node.children.reduce((sum, child) => sum + child.deletions, 0);
-      }
-    });
-  };
 
   const sortTree = (node) => {
     node.children.sort((a, b) => {
@@ -3364,7 +3358,6 @@ const buildFileTree = (files) => {
     node.children.forEach(sortTree);
   };
   
-  calculateTreeStats(root.children);
   sortTree(root);
   return root.children;
 };
