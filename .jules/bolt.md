@@ -20,3 +20,7 @@
 ## 2025-02-18 - Extract complex list items into memoized components to avoid cascading O(N) re-renders
 **Learning:** Found massive UI lag on Pull Request Detail pages when viewing large diffs. Interacting with a single file (like toggling collapse or viewed status) would update a state variable in the main \`PullRequestDetail\` component, triggering a cascading O(N) re-render of thousands of diff lines for *all* files. Inline \`.map()\` rendering for complex DOM trees kills React performance.
 **Action:** Extract expensive list items (like \`DiffFileCard\`) into separate components, wrap them in \`React.memo\`, and pass stable \`React.useCallback\` functions for state updates to prevent unaffected elements from re-rendering.
+
+## 2025-02-18 - Pre-aggregate tree stats incrementally to avoid recursive evaluation bottlenecks
+**Learning:** Found an `O(N * D)` algorithmic bottleneck in `frontend/src/pages/Repository.jsx` `calculateTreeStats` where tree nodes recursively aggregated child stats after the tree was built. For PRs with deep directory structures and many files, this caused significant redundant calculations.
+**Action:** When constructing deep hierarchies (e.g., file trees) where parent nodes depend on child node metrics, pre-aggregate these sums incrementally during the initial creation phase to avoid recursive evaluation bottlenecks.
