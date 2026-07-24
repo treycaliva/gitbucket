@@ -132,3 +132,65 @@ func TestDispatcher_5xxReturnsNon2xxForRetry(t *testing.T) {
 		t.Errorf("Attempts = %d", got.Attempts)
 	}
 }
+
+func TestVerifyOIDCAudience(t *testing.T) {
+	tests := []struct {
+		name       string
+		audience   string
+		authHeader string
+		want       bool
+	}{
+		{
+			name:     "no audience configured",
+			audience: "",
+			want:     true,
+		},
+		{
+			name:       "missing header",
+			audience:   "my-audience",
+			authHeader: "",
+			want:       false,
+		},
+		{
+			name:       "invalid header format - missing Bearer",
+			audience:   "my-audience",
+			authHeader: "Basic dXNlcm5hbWU6cGFzc3dvcmQ=",
+			want:       false,
+		},
+		{
+			name:       "invalid header format - just Bearer",
+			audience:   "my-audience",
+			authHeader: "Bearer",
+			want:       false,
+		},
+		{
+			name:       "invalid header format - just Bearer with space",
+			audience:   "my-audience",
+			authHeader: "Bearer ",
+			want:       false,
+		},
+		{
+			name:       "invalid token",
+			audience:   "my-audience",
+			authHeader: "Bearer invalid_token_format",
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("POST", "/", nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+
+			got := verifyOIDCAudience(req, tt.audience)
+			if got != tt.want {
+				t.Errorf("verifyOIDCAudience() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
