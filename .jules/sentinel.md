@@ -12,3 +12,8 @@
 **Vulnerability:** The application used the default `http.Client` without custom protections to send webhooks to user-provided URLs in `internal/apps/dispatcher.go`.
 **Learning:** This exposes the application to Server-Side Request Forgery (SSRF) and DNS rebinding attacks, where an attacker could construct URLs that resolve to internal IPs (e.g. cloud metadata servers like `169.254.169.254`, `localhost`, or private network endpoints) to bypass firewall restrictions and extract sensitive data.
 **Prevention:** When making outbound HTTP requests to user-provided URLs, always configure the `http.Client` to use a custom `net.Dialer`. Implement an SSRF-safe validation in the dialer's `Control` hook to verify that the resolved IP address is not within loopback, private, link-local, or unspecified ranges. Additionally, bypass these restrictions explicitly in test files when interacting with local `httptest` servers.
+
+## 2025-02-18 - Unauthenticated Cloud Tasks Webhook Dispatcher
+**Vulnerability:** The `verifyOIDCAudience` function in `internal/apps/dispatcher.go` was hardcoded to return `true`, completely bypassing the validation of the Cloud Tasks OIDC token (JWT).
+**Learning:** MVP placeholders (`return true`) in security-critical authentication paths leave endpoints vulnerable to unauthorized access or forged requests if network-level protections fail or are misconfigured.
+**Prevention:** Always implement proper JWT verification using established libraries (like `google.golang.org/api/idtoken`) to validate the `Authorization: Bearer <jwt>` token against the expected audience claim, rather than relying on placeholder logic.
