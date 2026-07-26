@@ -3307,7 +3307,8 @@ const parseFileDiffLines = (rawLines) => {
 };
 
 const buildFileTree = (files) => {
-  const root = { name: 'root', path: '', isDirectory: true, children: [] };
+  // ⚡ Bolt optimization: Pre-initialize root with metric fields (additions, deletions: 0).
+  const root = { name: 'root', path: '', isDirectory: true, children: [], additions: 0, deletions: 0 };
   // ⚡ Bolt optimization: Use an O(1) hash map lookup instead of O(N) array search on current.children
   // This reduces tree construction from O(N * D) to O(N), significantly speeding up large PR rendering
   const nodeMap = new Map();
@@ -3317,6 +3318,10 @@ const buildFileTree = (files) => {
     const parts = file.path.split('/');
     let currentPath = '';
     
+    // ⚡ Bolt optimization: Pre-aggregate sums incrementally during creation to avoid O(N*D) recursive evaluation later.
+    root.additions += file.additions;
+    root.deletions += file.deletions;
+
     parts.forEach((part, partIndex) => {
       const parentPath = currentPath;
       currentPath = currentPath ? `${currentPath}/${part}` : part;
@@ -3338,22 +3343,10 @@ const buildFileTree = (files) => {
         nodeMap.set(currentPath, child);
       }
       
-      if (isLast) {
-        child.additions = file.additions;
-        child.deletions = file.deletions;
-      }
+      child.additions += file.additions;
+      child.deletions += file.deletions;
     });
   });
-
-  const calculateTreeStats = (nodes) => {
-    nodes.forEach(node => {
-      if (node.isDirectory) {
-        calculateTreeStats(node.children);
-        node.additions = node.children.reduce((sum, child) => sum + child.additions, 0);
-        node.deletions = node.children.reduce((sum, child) => sum + child.deletions, 0);
-      }
-    });
-  };
 
   const sortTree = (node) => {
     node.children.sort((a, b) => {
@@ -3364,7 +3357,6 @@ const buildFileTree = (files) => {
     node.children.forEach(sortTree);
   };
   
-  calculateTreeStats(root.children);
   sortTree(root);
   return root.children;
 };
