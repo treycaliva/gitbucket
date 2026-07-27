@@ -1,22 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { apiClient } from '../apiClient';
 import { parseManifestFromURL } from '../utils/manifestUrl';
 import { AppWindow } from 'lucide-react';
 import Card from '../components/Card';
 
 export default function SettingsAppsNew({ user, onNavigate }) {
-  const [manifest, setManifest] = useState(null);
-  const [error, setError] = useState(null);
+  // ⚡ Bolt: Lazy state initialization to prevent cascading re-renders on component mount.
+  // Avoids synchronous setState inside useEffect.
+  const [manifest] = useState(() => parseManifestFromURL(window.location.search));
+  const [error, setError] = useState(() => manifest ? null : 'Missing or invalid manifest in URL.');
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const m = parseManifestFromURL(window.location.search);
-    if (!m) {
-      setError('Missing or invalid manifest in URL.');
-      return;
-    }
-    setManifest(m);
-  }, []);
 
   const handleConfirm = async () => {
     setSubmitting(true);

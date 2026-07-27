@@ -20,3 +20,7 @@
 ## 2025-02-18 - Extract complex list items into memoized components to avoid cascading O(N) re-renders
 **Learning:** Found massive UI lag on Pull Request Detail pages when viewing large diffs. Interacting with a single file (like toggling collapse or viewed status) would update a state variable in the main \`PullRequestDetail\` component, triggering a cascading O(N) re-render of thousands of diff lines for *all* files. Inline \`.map()\` rendering for complex DOM trees kills React performance.
 **Action:** Extract expensive list items (like \`DiffFileCard\`) into separate components, wrap them in \`React.memo\`, and pass stable \`React.useCallback\` functions for state updates to prevent unaffected elements from re-rendering.
+
+## 2025-02-18 - Avoid synchronous setState within useEffect to prevent cascading re-renders
+**Learning:** Found cascading re-renders in `LatestCommitBar` and `SettingsAppsNew` where `useEffect` hooks were used to synchronously reset or initialize state. Calling `setState` synchronously within a `useEffect` triggers a second render pass after the browser has already painted the initial state, hurting performance and causing potential visual flickering.
+**Action:** Use the derived state pattern (tracking `prevProp` during render phase) to reset state on prop changes, or lazy initialization (`useState(() => ...)`) to compute initial state from the browser context without using an effect.
