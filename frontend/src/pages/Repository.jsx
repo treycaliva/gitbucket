@@ -3307,7 +3307,7 @@ const parseFileDiffLines = (rawLines) => {
 };
 
 const buildFileTree = (files) => {
-  const root = { name: 'root', path: '', isDirectory: true, children: [] };
+  const root = { name: 'root', path: '', isDirectory: true, children: [], additions: 0, deletions: 0 };
   // ⚡ Bolt optimization: Use an O(1) hash map lookup instead of O(N) array search on current.children
   // This reduces tree construction from O(N * D) to O(N), significantly speeding up large PR rendering
   const nodeMap = new Map();
@@ -3338,22 +3338,13 @@ const buildFileTree = (files) => {
         nodeMap.set(currentPath, child);
       }
       
-      if (isLast) {
-        child.additions = file.additions;
-        child.deletions = file.deletions;
-      }
+      // ⚡ Bolt optimization: Pre-aggregate sums incrementally during construction
+      // instead of recursively evaluating the whole tree bottom-up later.
+      // Avoids an O(N * D) evaluation bottleneck.
+      child.additions = (child.additions || 0) + (file.additions || 0);
+      child.deletions = (child.deletions || 0) + (file.deletions || 0);
     });
   });
-
-  const calculateTreeStats = (nodes) => {
-    nodes.forEach(node => {
-      if (node.isDirectory) {
-        calculateTreeStats(node.children);
-        node.additions = node.children.reduce((sum, child) => sum + child.additions, 0);
-        node.deletions = node.children.reduce((sum, child) => sum + child.deletions, 0);
-      }
-    });
-  };
 
   const sortTree = (node) => {
     node.children.sort((a, b) => {
@@ -3364,7 +3355,6 @@ const buildFileTree = (files) => {
     node.children.forEach(sortTree);
   };
   
-  calculateTreeStats(root.children);
   sortTree(root);
   return root.children;
 };
