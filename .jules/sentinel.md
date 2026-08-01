@@ -16,3 +16,8 @@
 **Vulnerability:** The webhook dispatcher's `verifyOIDCAudience` function was hardcoded to `return true`, bypassing OIDC token validation. Cloud Tasks requests could be spoofed since it blindly trusted unverified `Authorization: Bearer <jwt>` headers.
 **Learning:** MVP/Plan 3 implementations often include placeholder security logic (like permissive token validation). When adding these components, the network architecture (e.g. relying only on Cloud Run internal ingress) shouldn't be an excuse for incomplete application-layer validation.
 **Prevention:** Always implement actual validation logic for security boundaries using standard libraries (`google.golang.org/api/idtoken`) rather than stubbing them, even in MVPs, to ensure defense-in-depth.
+
+## 2026-05-25 - Path Traversal Vulnerability in Webhook and LFS Endpoints
+**Vulnerability:** The application used raw URL parameters (`chi.URLParam(r, "oid")`) directly in file system paths via `filepath.Join` without validating them against their expected format. This allowed attackers to craft OIDs with path traversal sequences (like `..%2F`) to read or write arbitrary files on the local disk.
+**Learning:** Frameworks like `go-chi` may unescape path parameters, but they do not automatically sanitize them against traversal sequences. Direct use of such parameters in file operations is inherently dangerous.
+**Prevention:** Always strictly validate user-provided input, especially parameters used in file paths, against their expected format (e.g., ensuring a Git LFS OID is exactly a 64-character hexadecimal string) before utilizing them in sensitive operations.

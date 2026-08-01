@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"gitbucket/internal/gcs"
 	gitpkg "gitbucket/internal/git"
 )
+
+var validOIDRegex = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 
 // defaultZeroSHA returns s unchanged, or the all-zeros SHA-1 string when s is
 // empty. Used when building PushPayload Before/After fields for ref creations
@@ -575,6 +578,18 @@ func (h *APIHandler) HandleLFSBatch(w http.ResponseWriter, r *http.Request) {
 
 	var objectsResp []LFSObjectResponse
 	for _, obj := range req.Objects {
+		if !validOIDRegex.MatchString(obj.Oid) {
+			objectsResp = append(objectsResp, LFSObjectResponse{
+				Oid:  obj.Oid,
+				Size: obj.Size,
+				Error: &LFSError{
+					Code:    400,
+					Message: "Invalid OID format",
+				},
+			})
+			continue
+		}
+
 		respObj := LFSObjectResponse{
 			Oid:  obj.Oid,
 			Size: obj.Size,
@@ -637,6 +652,11 @@ func (h *APIHandler) HandleLFSUpload(w http.ResponseWriter, r *http.Request) {
 	repoParam := chi.URLParam(r, "repo")
 	repo := strings.TrimSuffix(repoParam, ".git")
 	oid := chi.URLParam(r, "oid")
+
+	if !validOIDRegex.MatchString(oid) {
+		http.Error(w, "Invalid OID format", http.StatusBadRequest)
+		return
+	}
 
 	// 1. Fetch metadata and check ownership
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
@@ -840,6 +860,11 @@ func (h *APIHandler) HandleLFSDownload(w http.ResponseWriter, r *http.Request) {
 	repoParam := chi.URLParam(r, "repo")
 	repo := strings.TrimSuffix(repoParam, ".git")
 	oid := chi.URLParam(r, "oid")
+
+	if !validOIDRegex.MatchString(oid) {
+		http.Error(w, "Invalid OID format", http.StatusBadRequest)
+		return
+	}
 
 	// 1. Fetch metadata and check permissions
 	repoMeta, err := db.GetRepositoryMetadata(r.Context(), h.FirestoreClient, owner, repo)
