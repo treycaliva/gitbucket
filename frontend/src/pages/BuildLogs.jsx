@@ -1,13 +1,35 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { apiClient } from '../apiClient';
 import { ArrowLeft, ExternalLink, Terminal, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import Card from '../components/Card';
 import Chip from '../components/Chip';
 
+// ⚡ Bolt Optimization: Extract LogLine into a memoized component.
+// Why: Build logs are append-only lists that can grow to thousands of lines.
+// Wrapping the row component in React.memo prevents React from re-rendering
+// all previous N-1 lines whenever a new log line arrives via WebSocket.
+// Impact: Reduces rendering complexity of log updates from O(N^2) to O(1).
+const LogLine = memo(({ line }) => {
+  let lineStyle = { color: 'var(--gb-fg-2)' };
+  const lowerLine = line.toLowerCase();
+  if (lowerLine.includes('error') || lowerLine.includes('failed')) {
+    lineStyle = { color: 'var(--gb-err)' };
+  } else if (lowerLine.includes('success') || lowerLine.includes('passed')) {
+    lineStyle = { color: 'var(--gb-ok)' };
+  } else if (line.startsWith('Step ') || line.startsWith('Starting ')) {
+    lineStyle = { color: 'var(--gb-accent)', fontWeight: 'bold' };
+  }
+
+  return (
+    <div style={lineStyle}>
+      {line}
+    </div>
+  );
+});
+
 export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
   const [status, setStatus] = useState('LOADING');
   const [logs, setLogs] = useState([]);
-  const [error, setError] = useState('');
   const [signedUrl, setSignedUrl] = useState('');
   const logEndRef = useRef(null);
   const wsRef = useRef(null);
@@ -69,7 +91,6 @@ export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
       } catch (err) {
         if (!active) return;
         console.error("Failed to establish websocket logging:", err);
-        setError(err.message || 'Failed to connect to build log server.');
         setStatus('FAILED');
         // Fallback to Signed URL log fetch immediately
         fetchSignedUrl();
@@ -224,22 +245,9 @@ export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
             </div>
           )}
 
-          {logs.map((line, index) => {
-            let lineStyle = { color: 'var(--gb-fg-2)' };
-            if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
-              lineStyle = { color: 'var(--gb-err)' };
-            } else if (line.toLowerCase().includes('success') || line.toLowerCase().includes('passed')) {
-              lineStyle = { color: 'var(--gb-ok)' };
-            } else if (line.startsWith('Step ') || line.startsWith('Starting ')) {
-              lineStyle = { color: 'var(--gb-accent)', fontWeight: 'bold' };
-            }
-
-            return (
-              <div key={index} style={lineStyle}>
-                {line}
-              </div>
-            );
-          })}
+          {logs.map((line, index) => (
+            <LogLine key={index} line={line} />
+          ))}
           <div ref={logEndRef} />
         </div>
       </Card>
