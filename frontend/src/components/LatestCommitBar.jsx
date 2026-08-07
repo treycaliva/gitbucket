@@ -7,13 +7,17 @@ import { initials, colorFor } from '../utils/avatarColor';
 export default function LatestCommitBar({ owner, repo, branch, onViewCommits }) {
   const [head, setHead] = useState(null);
   const [error, setError] = useState('');
+  const [prevBranch, setPrevBranch] = useState(branch);
+
+  if (branch !== prevBranch) {
+    setPrevBranch(branch);
+    setHead(null);
+    setError('');
+  }
 
   useEffect(() => {
     if (!branch) return;
     let cancelled = false;
-    // Reset so a branch switch clears the prior commit instead of flashing it.
-    setHead(null);
-    setError('');
     apiClient
       .get(`/api/repos/${owner}/${repo}/refs/${encodeURIComponent(branch)}/head`)
       .then((data) => {
