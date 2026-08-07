@@ -1,13 +1,35 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../apiClient';
 import { ArrowLeft, ExternalLink, Terminal, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import Card from '../components/Card';
 import Chip from '../components/Chip';
 
+// ⚡ Bolt: Extract log line rendering into a memoized component.
+// This prevents O(N^2) cascading re-renders and redundant string parsing
+// when new lines are appended to the logs array.
+const LogLine = React.memo(({ line }) => {
+  let lineStyle = { color: 'var(--gb-fg-2)' };
+  const lowerLine = line.toLowerCase();
+
+  if (lowerLine.includes('error') || lowerLine.includes('failed')) {
+    lineStyle = { color: 'var(--gb-err)' };
+  } else if (lowerLine.includes('success') || lowerLine.includes('passed')) {
+    lineStyle = { color: 'var(--gb-ok)' };
+  } else if (line.startsWith('Step ') || line.startsWith('Starting ')) {
+    lineStyle = { color: 'var(--gb-accent)', fontWeight: 'bold' };
+  }
+
+  return (
+    <div style={lineStyle}>
+      {line}
+    </div>
+  );
+});
+
 export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
   const [status, setStatus] = useState('LOADING');
   const [logs, setLogs] = useState([]);
-  const [error, setError] = useState('');
+  const [, setError] = useState('');
   const [signedUrl, setSignedUrl] = useState('');
   const logEndRef = useRef(null);
   const wsRef = useRef(null);
@@ -224,22 +246,9 @@ export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
             </div>
           )}
 
-          {logs.map((line, index) => {
-            let lineStyle = { color: 'var(--gb-fg-2)' };
-            if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
-              lineStyle = { color: 'var(--gb-err)' };
-            } else if (line.toLowerCase().includes('success') || line.toLowerCase().includes('passed')) {
-              lineStyle = { color: 'var(--gb-ok)' };
-            } else if (line.startsWith('Step ') || line.startsWith('Starting ')) {
-              lineStyle = { color: 'var(--gb-accent)', fontWeight: 'bold' };
-            }
-
-            return (
-              <div key={index} style={lineStyle}>
-                {line}
-              </div>
-            );
-          })}
+          {logs.map((line, index) => (
+            <LogLine key={index} line={line} />
+          ))}
           <div ref={logEndRef} />
         </div>
       </Card>
