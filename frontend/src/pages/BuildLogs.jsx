@@ -1,27 +1,46 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../apiClient';
 import { ArrowLeft, ExternalLink, Terminal, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import Card from '../components/Card';
 import Chip from '../components/Chip';
 
+// Memoized LogLine component to prevent re-evaluating toLowerCase and re-rendering all lines when new ones are added
+const LogLine = React.memo(({ line }) => {
+  let lineStyle = { color: 'var(--gb-fg-2)' };
+  const lowerLine = line.toLowerCase();
+
+  if (lowerLine.includes('error') || lowerLine.includes('failed')) {
+    lineStyle = { color: 'var(--gb-err)' };
+  } else if (lowerLine.includes('success') || lowerLine.includes('passed')) {
+    lineStyle = { color: 'var(--gb-ok)' };
+  } else if (line.startsWith('Step ') || line.startsWith('Starting ')) {
+    lineStyle = { color: 'var(--gb-accent)', fontWeight: 'bold' };
+  }
+
+  return (
+    <div style={lineStyle}>
+      {line}
+    </div>
+  );
+});
+
 export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
   const [status, setStatus] = useState('LOADING');
   const [logs, setLogs] = useState([]);
-  const [error, setError] = useState('');
   const [signedUrl, setSignedUrl] = useState('');
   const logEndRef = useRef(null);
   const wsRef = useRef(null);
 
-  const fetchSignedUrl = async () => {
-    try {
-      const data = await apiClient.get(`/api/repos/${owner}/${repo}/builds/${buildId}/logs`);
-      setSignedUrl(data.signedUrl);
-    } catch (err) {
-      console.error("Failed to fetch GCS log signed URL:", err);
-    }
-  };
-
   useEffect(() => {
+    const fetchSignedUrl = async () => {
+      try {
+        const data = await apiClient.get(`/api/repos/${owner}/${repo}/builds/${buildId}/logs`);
+        setSignedUrl(data.signedUrl);
+      } catch (err) {
+        console.error("Failed to fetch GCS log signed URL:", err);
+      }
+    };
+
     let active = true;
 
     const connectLogsStream = async () => {
@@ -69,7 +88,6 @@ export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
       } catch (err) {
         if (!active) return;
         console.error("Failed to establish websocket logging:", err);
-        setError(err.message || 'Failed to connect to build log server.');
         setStatus('FAILED');
         // Fallback to Signed URL log fetch immediately
         fetchSignedUrl();
@@ -224,22 +242,9 @@ export default function BuildLogs({ owner, repo, sha, buildId, onNavigate }) {
             </div>
           )}
 
-          {logs.map((line, index) => {
-            let lineStyle = { color: 'var(--gb-fg-2)' };
-            if (line.toLowerCase().includes('error') || line.toLowerCase().includes('failed')) {
-              lineStyle = { color: 'var(--gb-err)' };
-            } else if (line.toLowerCase().includes('success') || line.toLowerCase().includes('passed')) {
-              lineStyle = { color: 'var(--gb-ok)' };
-            } else if (line.startsWith('Step ') || line.startsWith('Starting ')) {
-              lineStyle = { color: 'var(--gb-accent)', fontWeight: 'bold' };
-            }
-
-            return (
-              <div key={index} style={lineStyle}>
-                {line}
-              </div>
-            );
-          })}
+          {logs.map((line, index) => (
+            <LogLine key={index} line={line} />
+          ))}
           <div ref={logEndRef} />
         </div>
       </Card>
