@@ -23,3 +23,6 @@
 ## 2025-02-18 - Optimize tree statistics calculation with pre-aggregation
 **Learning:** In deeply nested structures like file trees, bottom-up recursive evaluations that iterate over child nodes (e.g., `calculateTreeStats`) cause O(N*D) redundant calculations where parent layers repeatedly sum child aggregations.
 **Action:** When constructing deep hierarchies where parent nodes depend on child node metrics, pre-aggregate these sums incrementally during the initial creation phase to avoid O(N*D) recursive evaluation bottlenecks. Ensure all nodes (including the root and dynamically created children) are defensively initialized and incremented (e.g., `node.val = (node.val || 0) + (newVal || 0)`) to prevent NaN errors during aggregation.
+## 2025-02-18 - Optimize append-only streaming logs in React
+**Learning:** Rendering append-only stream items (such as streaming WebSocket logs) with expensive inline string operations (e.g. `toLowerCase().includes()`) causes O(N²) bottlenecks as the list grows, because React re-evaluates the expensive operations across the entire list on every state update.
+**Action:** Extract the individual stream items into separate components wrapped in `React.memo()` to prevent re-evaluating expensive operations across the entire list when new items are appended.
