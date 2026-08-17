@@ -23,3 +23,7 @@
 ## 2025-02-18 - Optimize tree statistics calculation with pre-aggregation
 **Learning:** In deeply nested structures like file trees, bottom-up recursive evaluations that iterate over child nodes (e.g., `calculateTreeStats`) cause O(N*D) redundant calculations where parent layers repeatedly sum child aggregations.
 **Action:** When constructing deep hierarchies where parent nodes depend on child node metrics, pre-aggregate these sums incrementally during the initial creation phase to avoid O(N*D) recursive evaluation bottlenecks. Ensure all nodes (including the root and dynamically created children) are defensively initialized and incremented (e.g., `node.val = (node.val || 0) + (newVal || 0)`) to prevent NaN errors during aggregation.
+
+## 2025-02-18 - Optimize append-only stream rendering with React.memo
+**Learning:** Rendering streaming log data (like WebSockets) by directly iterating over an array with `.map()` inline causes severe O(N^2) rendering bottlenecks. In `frontend/src/pages/BuildLogs.jsx`, every new log line forced React to evaluate and diff the entire array of thousands of log lines.
+**Action:** Extract individual log line rendering logic into a separate `React.memo()` component. This ensures only the newly appended line evaluates its DOM, while earlier lines short-circuit re-rendering, preventing cascading render lag in streaming views.
